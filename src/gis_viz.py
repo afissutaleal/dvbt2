@@ -509,27 +509,27 @@ def create_cloudrf_gis_map(
 
         fg_sp.add_to(m)
 
-    # 7. CloudRF Style Vertical Colorbar Legend (Pinned on Top-Right Edge)
+    # 7. CloudRF Style Vertical Colorbar Legend (Transparent Background - Blends Seamlessly with Map)
     colorbar_html = """
     <div style="
         position: fixed; 
-        top: 60px; right: 18px; width: 72px; 
-        background: rgba(15, 23, 42, 0.65) !important; 
-        backdrop-filter: blur(10px) !important;
-        -webkit-backdrop-filter: blur(10px) !important;
+        top: 60px; right: 16px; width: 68px; 
+        background: transparent !important; 
         color: #f8fafc !important; 
-        border: 1px solid rgba(255, 255, 255, 0.22) !important; 
+        border: none !important; 
         z-index: 999999 !important; 
-        padding: 8px 6px !important; 
-        border-radius: 8px !important; 
-        box-shadow: 0 8px 30px rgba(0,0,0,0.40) !important; 
+        padding: 2px !important; 
+        box-shadow: none !important; 
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; 
         text-align: center !important;
+        pointer-events: none;
     ">
-        <div style="font-weight: 700; font-size: 10px; color: #38bdf8; letter-spacing: 0.5px; margin-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.18); padding-bottom: 3px;">
+        <div style="font-weight: 800; font-size: 11px; color: #38bdf8; letter-spacing: 0.5px; margin-bottom: 6px; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);">
             dBµV/m
         </div>
-        <div style="display: flex; flex-direction: row; align-items: stretch; justify-content: center; height: 190px;">
+        <div style="display: flex; flex-direction: row; align-items: stretch; justify-content: center; height: 185px;">
             <div style="
                 width: 14px; 
                 margin-right: 7px; 
@@ -540,19 +540,20 @@ def create_cloudrf_gis_map(
                     #f97316 32%, 
                     #f97316 64%, 
                     #3b82f6 64%, 
-                    #3b82f6 88%,
-                    rgba(255, 255, 255, 0.05) 88%,
-                    rgba(255, 255, 255, 0.05) 100%);
-                border: 1px solid rgba(255,255,255,0.25);
+                    #3b82f6 86%,
+                    transparent 86%,
+                    transparent 100%);
+                border: 1.5px solid rgba(15, 23, 42, 0.85);
+                box-shadow: 0 0 2px rgba(255, 255, 255, 0.5), 0 2px 5px rgba(0,0,0,0.4);
             "></div>
-            <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 9px; font-weight: 700; text-align: left; color: #f1f5f9; line-height: 1.1;">
-                <span style="color: #ef4444;" title="Sangat Kuat (≥65 dBµV/m)">≥65</span>
-                <span style="color: #f97316;" title="Kuat (54 - 65 dBµV/m)">54</span>
-                <span style="color: #3b82f6;" title="Sedang (45.2 - 54 dBµV/m)">45.2</span>
-                <span style="color: #94a3b8;" title="Blank Spot (<45.2 dBµV/m)">&lt;45.2</span>
+            <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; font-weight: 800; text-align: left; line-height: 1;">
+                <span style="color: #ef4444; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Sangat Kuat (≥65 dBµV/m)">≥65</span>
+                <span style="color: #f97316; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Kuat (54 - 65 dBµV/m)">54</span>
+                <span style="color: #3b82f6; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Sedang (45.2 - 54 dBµV/m)">45.2</span>
+                <span style="color: #e2e8f0; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Blank Spot (<45.2 dBµV/m)">&lt;45.2</span>
             </div>
         </div>
-        <div style="font-size: 8px; font-weight: 600; color: #94a3b8; margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 3px;">
+        <div style="font-size: 9px; font-weight: 800; color: #e2e8f0; margin-top: 6px; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9); letter-spacing: 0.5px;">
             DVB-T2
         </div>
     </div>
