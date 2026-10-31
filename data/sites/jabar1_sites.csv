@@ -1,0 +1,3 @@
+site_id,site_name,tx_latitude,tx_longitude,tx_antenna_amsl,frequency_mhz,erp,azimuth_main_lobe
+TX_JB_01,TVRI Gandasoli (Bukit Panyandaan),-6.8672,107.6741,1150.0,586.0,25.0,230.0
+TX_JB_02,Trans Media Bandung (Cimenyan),-6.872,107.655,1080.0,634.0,20.0,210.0

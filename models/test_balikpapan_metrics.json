@@ -1,0 +1,33 @@
+{
+  "train_rmse": 3.2687,
+  "val_rmse": 3.7176,
+  "test_rmse": 3.4442,
+  "test_mae": 2.7554,
+  "test_r2": 0.868,
+  "n_train": 2618,
+  "n_val": 561,
+  "n_test": 561,
+  "best_params": {
+    "n_estimators": 866,
+    "learning_rate": 0.020165721691808594,
+    "max_depth": 4,
+    "subsample": 0.8736932106048627,
+    "colsample_bytree": 0.7760609974958406,
+    "min_child_weight": 2,
+    "gamma": 0.2475884550556351,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "feature_importances": {
+    "frequency_hz": 0.00793,
+    "eirp_dbm": 0.04056,
+    "distance_km": 0.43473,
+    "azimuth_sin": 0.08759,
+    "azimuth_cos": 0.20879,
+    "tx_antenna_amsl": 0.10495,
+    "rx_antenna_amsl": 0.05089,
+    "clearance_m": 0.06456
+  },
+  "region_code": "test_balikpapan"
+}

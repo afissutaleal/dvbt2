@@ -1,0 +1,7 @@
+{
+  "n_raw_drivetest": 6760,
+  "n_after_exact_dedup": 6460,
+  "n_after_stationary_agg": 6460,
+  "n_matched_model": 3740,
+  "n_transmitters": 11
+}

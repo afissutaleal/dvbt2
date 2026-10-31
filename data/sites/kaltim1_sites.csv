@@ -1,0 +1,4 @@
+site_id,site_name,tx_latitude,tx_longitude,tx_antenna_amsl,frequency_mhz,erp,azimuth_main_lobe
+TX_K1_01,TVRI Samarinda (Gunung Selili),-0.5089,117.1593,165.0,546.0,20.0,225.0
+TX_K1_02,TVRI Balikpapan (Gunung Polisi),-1.2534,116.8372,142.0,546.0,20.0,45.0
+TX_K1_03,MNC Media Samarinda (Sempaja),-0.465,117.142,130.0,586.0,15.0,180.0

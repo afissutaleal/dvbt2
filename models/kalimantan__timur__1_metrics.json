@@ -1,0 +1,33 @@
+{
+  "train_rmse": 2.109,
+  "val_rmse": 2.8173,
+  "test_rmse": 2.8493,
+  "test_mae": 2.1731,
+  "test_r2": 0.96,
+  "n_train": 81232,
+  "n_val": 17407,
+  "n_test": 17407,
+  "best_params": {
+    "n_estimators": 814,
+    "learning_rate": 0.0985505986334101,
+    "max_depth": 8,
+    "subsample": 0.9203193264955175,
+    "colsample_bytree": 0.7588822469148957,
+    "min_child_weight": 4,
+    "gamma": 0.2432939440067576,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "feature_importances": {
+    "frequency_hz": 0.04941,
+    "eirp_dbm": 0.26188,
+    "distance_km": 0.32102,
+    "azimuth_sin": 0.09924,
+    "azimuth_cos": 0.08648,
+    "tx_antenna_amsl": 0.0813,
+    "rx_antenna_amsl": 0.03052,
+    "clearance_m": 0.07016
+  },
+  "region_code": "kalimantan__timur__1"
+}

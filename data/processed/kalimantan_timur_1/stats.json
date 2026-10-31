@@ -1,0 +1,8 @@
+{
+  "n_raw_drivetest": 241404,
+  "n_after_exact_dedup": 241404,
+  "n_after_stationary_agg": 116046,
+  "n_matched_model": 116046,
+  "n_transmitters": 6,
+  "region_name": "Kalimantan Timur 1"
+}
