@@ -445,6 +445,7 @@ def generate_continuous_coverage_raster(
     dist_idx = np.clip(np.round(dist_norm * (n_samples_per_ray - 1)).astype(int), 0, n_samples_per_ray - 1)
 
     clr_valid = ray_clearances[ray_idx, dist_idx]
+    elev_valid = elevs[ray_idx, dist_idx]
 
     # Radio Horizon & Obstruction Cutoff
     d_horizon_box = 4.122 * (np.sqrt(max(tx_amsl, 0.0)) + np.sqrt(max(rx_antenna_amsl, 0.0)))
@@ -511,6 +512,12 @@ def generate_continuous_coverage_raster(
     clr_grid[valid_idx[0], valid_idx[1]] = clr_quantized
     clr_grid_b64 = base64.b64encode(clr_grid.tobytes()).decode('ascii')
 
+    # Quantize terrain elevation: stored as int16 (-500 to 32000m AMSL)
+    elev_grid = np.zeros((H, W), dtype=np.int16)
+    elev_quantized = np.clip(np.round(elev_valid), -500, 32000).astype(np.int16)
+    elev_grid[valid_idx[0], valid_idx[1]] = elev_quantized
+    elev_grid_b64 = base64.b64encode(elev_grid.tobytes()).decode('ascii')
+
     raster_overlay_data = {
         'image_b64': b64_png,
         'bounds': [[float(min_lat), float(min_lon)], [float(max_lat), float(max_lon)]],
@@ -528,7 +535,8 @@ def generate_continuous_coverage_raster(
         'tx_name': str(tx_params.get('STN_NAME', 'TX')),
         'freq_mhz': round(freq_hz / 1e6, 2),
         'fs_grid_b64': fs_grid_b64,
-        'clr_grid_b64': clr_grid_b64
+        'clr_grid_b64': clr_grid_b64,
+        'elev_grid_b64': elev_grid_b64
     }
 
     # 4. Representative Sample Points DataFrame for Table & CSV Export
@@ -551,6 +559,7 @@ def generate_continuous_coverage_raster(
         'center_lat': np.round(lats_valid[sample_sub_idx], 6),
         'center_lon': np.round(lons_valid[sample_sub_idx], 6),
         'distance_km': np.round(d_valid[sample_sub_idx], 3),
+        'elevation_m': np.round(elev_valid[sample_sub_idx], 1),
         'clearance_m': np.round(clr_valid[sample_sub_idx], 2),
         'median_field_strength_dbuv_m': np.round(preds[sample_sub_idx], 2),
         'category': categories[sample_sub_idx],

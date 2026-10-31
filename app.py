@@ -93,20 +93,42 @@ st.markdown("""
         font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
+    /* Elevate and widen layout to maximize map canvas */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        max-width: 99% !important;
+    }
+    section[data-testid="stSidebar"] .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1.5rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+    div[data-testid="stSidebarUserContent"] {
+        padding-top: 0.5rem !important;
+    }
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 2.2rem !important;
+    }
+
     /* Executive Toolbar Header */
     .cloudrf-header {
         background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #0B132B 100%);
         color: #F8FAFC;
-        padding: 16px 24px;
-        border-radius: 12px;
-        margin-bottom: 14px;
+        padding: 10px 18px;
+        border-radius: 10px;
+        margin-bottom: 10px;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
         border: 1px solid rgba(255, 255, 255, 0.12);
         display: flex;
         justify-content: space-between;
         align-items: center;
         flex-wrap: wrap;
-        gap: 12px;
+        gap: 10px;
     }
     .header-left {
         display: flex;
@@ -439,31 +461,31 @@ with st.sidebar:
 
         elif active_view == "🎯 Prediksi Titik Tunggal":
             st.markdown("##### 🎯 Parameter Titik Tunggal")
+            st.info("💡 **Tips:** Klik langsung pada peta untuk memilih titik penerima (Rx), atau masukkan koordinat secara manual di bawah.")
             sp_tx_selected = st.selectbox("Pilih Pemancar:", tx_names_list, index=0 if len(tx_names_list) > 0 else 0, key="sb_sp_tx")
             
             p_row_init = df_tx_curr[df_tx_curr['STN_NAME'] == sp_tx_selected].iloc[0] if len(tx_names_list) > 0 else None
-            init_lat = float(p_row_init['SID_LAT']) + 0.08 if p_row_init is not None else -1.20
-            init_lon = float(p_row_init['SID_LONG']) + 0.06 if p_row_init is not None else 116.88
+            default_lat = float(p_row_init['SID_LAT']) + 0.08 if p_row_init is not None else -1.20
+            default_lon = float(p_row_init['SID_LONG']) + 0.06 if p_row_init is not None else 116.88
 
-            sp_rx_lat = st.number_input("Latitude Penerima (Rx):", value=init_lat, format="%.6f")
-            sp_rx_lon = st.number_input("Longitude Penerima (Rx):", value=init_lon, format="%.6f")
+            if 'sp_rx_lat_val' not in st.session_state:
+                st.session_state['sp_rx_lat_val'] = default_lat
+            if 'sp_rx_lon_val' not in st.session_state:
+                st.session_state['sp_rx_lon_val'] = default_lon
+
+            cur_lat = float(st.session_state['sp_rx_lat_val'])
+            cur_lon = float(st.session_state['sp_rx_lon_val'])
+
+            sp_rx_lat = st.number_input("Latitude Penerima (Rx):", value=cur_lat, format="%.6f", key="input_sp_rx_lat")
+            sp_rx_lon = st.number_input("Longitude Penerima (Rx):", value=cur_lon, format="%.6f", key="input_sp_rx_lon")
+            st.session_state['sp_rx_lat_val'] = sp_rx_lat
+            st.session_state['sp_rx_lon_val'] = sp_rx_lon
+
             sp_rx_amsl = st.number_input("Tinggi Antena Rx (m AMSL):", value=25.0, step=5.0)
             sp_strict_nlos = st.toggle("Strict NLoS Cutoff", value=False, key="sp_toggle_nlos")
             btn_run_sp = st.button("🎯 Hitung Kuat Medan", type="primary", use_container_width=True)
 
-        # Basemap Selector (Esri Satellite & OpenStreetMap)
-        st.markdown('<div class="sidebar-heading">🗺️ PETA DASAR (BASEMAP)</div>', unsafe_allow_html=True)
-        basemap_sel = st.selectbox(
-            "Tipe Peta Dasar:",
-            options=["🛰️ Esri Satellite (Citra Satelit)", "🗺️ OpenStreetMap (Standar Jalan)"],
-            index=0,
-            label_visibility="collapsed"
-        )
-        basemap_key_map = {
-            "🛰️ Esri Satellite (Citra Satelit)": "satellite",
-            "🗺️ OpenStreetMap (Standar Jalan)": "street"
-        }
-        chosen_basemap = basemap_key_map.get(basemap_sel, "satellite")
+        chosen_basemap = "satellite"
 
     else:
         active_view = "➕ Buat Wilayah Baru"
@@ -579,6 +601,19 @@ show_cov_on_map = (active_view == "🗺️ Simulasi Cakupan (Coverage Grid)" and
 sp_ctx_map = st.session_state.get('single_pred_ctx') if active_view == "🎯 Prediksi Titik Tunggal" else None
 sp_res_map = st.session_state.get('single_pred_result') if active_view == "🎯 Prediksi Titik Tunggal" else None
 
+# If user is in Single Point mode and hasn't computed yet, create a lightweight ctx so target marker is visible on the map
+if active_view == "🎯 Prediksi Titik Tunggal" and sp_ctx_map is None and 'sp_rx_lat' in locals():
+    sel_sp_tx = df_tx_curr[df_tx_curr['STN_NAME'] == sp_tx_selected].iloc[0].to_dict() if len(tx_names_list) > 0 else {}
+    sp_ctx_map = {
+        'stn_name': str(sel_sp_tx.get('STN_NAME', 'TX')),
+        'tx_lat': float(sel_sp_tx.get('SID_LAT', sp_rx_lat)),
+        'tx_lon': float(sel_sp_tx.get('SID_LONG', sp_rx_lon)),
+        'rx_lat': float(sp_rx_lat),
+        'rx_lon': float(sp_rx_lon),
+        'rx_amsl': float(sp_rx_amsl),
+        'strict_nlos_cutoff': sp_strict_nlos
+    }
+
 highlight_stn = None
 if active_view == "📡 Data Pemancar" and 'map_filter_stn' in locals():
     highlight_stn = map_filter_stn
@@ -606,7 +641,46 @@ map_obj = create_cloudrf_gis_map(
 
 # Render map directly in the primary top section
 map_key = f"cloudrf_map_{region_code}_{active_view}_{chosen_basemap}_{highlight_stn}"
-st_folium(map_obj, width="100%", height=560, returned_objects=[], key=map_key)
+map_output = st_folium(
+    map_obj,
+    width="100%",
+    height=580,
+    returned_objects=["last_clicked"],
+    key=map_key
+)
+
+# Handle interactive click-to-select point in Single Point mode
+if active_view == "🎯 Prediksi Titik Tunggal" and map_output and map_output.get("last_clicked"):
+    clicked = map_output["last_clicked"]
+    c_lat = round(float(clicked["lat"]), 6)
+    c_lon = round(float(clicked["lng"]), 6)
+    if st.session_state.get('last_handled_map_click') != (c_lat, c_lon):
+        st.session_state['last_handled_map_click'] = (c_lat, c_lon)
+        st.session_state['sp_rx_lat_val'] = c_lat
+        st.session_state['sp_rx_lon_val'] = c_lon
+        st.session_state['input_sp_rx_lat'] = c_lat
+        st.session_state['input_sp_rx_lon'] = c_lon
+
+        if model_loaded and manager.active_model is not None and df_tx_curr is not None and len(df_tx_curr) > 0:
+            sel_sp_tx_row = df_tx_curr[df_tx_curr['STN_NAME'] == sp_tx_selected].iloc[0].to_dict()
+            single_res = manager.predict_single_point(
+                tx_row=sel_sp_tx_row,
+                rx_latitude=c_lat,
+                rx_longitude=c_lon,
+                rx_antenna_amsl=sp_rx_amsl,
+                strict_nlos_cutoff=sp_strict_nlos
+            )
+            st.session_state['single_pred_result'] = single_res
+            st.session_state['single_pred_ctx'] = {
+                'stn_name': str(sel_sp_tx_row['STN_NAME']),
+                'tx_lat': float(sel_sp_tx_row['SID_LAT']),
+                'tx_lon': float(sel_sp_tx_row['SID_LONG']),
+                'rx_lat': float(c_lat),
+                'rx_lon': float(c_lon),
+                'rx_amsl': float(sp_rx_amsl),
+                'strict_nlos_cutoff': sp_strict_nlos
+            }
+        st.rerun()
 
 
 # ==============================================================================

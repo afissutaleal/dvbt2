@@ -52,33 +52,10 @@ class RasterCoverageInspector(MacroElement):
                     .cloudrf-grid-tooltip:before {
                         border-top-color: rgba(15, 23, 42, 0.95) !important;
                     }
-                    .cloudrf-hud-panel {
-                        background: rgba(15, 23, 42, 0.70) !important;
-                        color: #f8fafc !important;
-                        border: 1px solid rgba(255, 255, 255, 0.20) !important;
-                        border-radius: 8px !important;
-                        padding: 7px 14px !important;
-                        box-shadow: 0 4px 22px rgba(0, 0, 0, 0.45) !important;
-                        font-family: system-ui, -apple-system, sans-serif !important;
-                        font-size: 12px !important;
-                        pointer-events: none !important;
-                        backdrop-filter: blur(10px) !important;
-                        -webkit-backdrop-filter: blur(10px) !important;
-                    }
                 `;
                 document.head.appendChild(customStyle);
 
-                // 2. Add native Leaflet HUD Control
-                var hudControl = L.control({ position: 'bottomleft' });
-                var hudContainer = null;
-                hudControl.onAdd = function() {
-                    hudContainer = L.DomUtil.create('div', 'cloudrf-hud-panel');
-                    hudContainer.innerHTML = '<span style="color:#38bdf8; font-weight:bold;">📡 Probe Kuat Medan:</span> <span style="color:#94a3b8; font-size:11px; margin-left:6px;">Arahkan kursor ke area coverage untuk inspeksi sinyal real-time</span>';
-                    return hudContainer;
-                };
-                hudControl.addTo(map);
-
-                // 3. Grid metadata & byte array decoding
+                // 2. Grid metadata & byte array decoding
                 var H = __H__;
                 var W = __W__;
                 var minLat = __MIN_LAT__;
@@ -101,6 +78,11 @@ class RasterCoverageInspector(MacroElement):
                 var clrRaw = atob("__CLR_B64__");
                 var clrBytes = new Uint8Array(clrRaw.length);
                 for (var j = 0; j < clrRaw.length; j++) clrBytes[j] = clrRaw.charCodeAt(j);
+
+                var elevRaw = atob("__ELEV_B64__");
+                var elevBytes = new Uint8Array(elevRaw.length);
+                for (var k = 0; k < elevRaw.length; k++) elevBytes[k] = elevRaw.charCodeAt(k);
+                var elevGrid = new Int16Array(elevBytes.buffer);
 
                 var probeTooltip = L.tooltip({
                     sticky: false,
@@ -125,9 +107,6 @@ class RasterCoverageInspector(MacroElement):
                 function clearInspector() {
                     if (map.hasLayer(probeTooltip)) map.removeLayer(probeTooltip);
                     if (cursorBox && map.hasLayer(cursorBox)) map.removeLayer(cursorBox);
-                    if (hudContainer) {
-                        hudContainer.innerHTML = '<span style="color:#38bdf8; font-weight:bold;">📡 Probe Kuat Medan:</span> <span style="color:#94a3b8; font-size:11px; margin-left:6px;">Arahkan kursor ke area coverage untuk inspeksi sinyal real-time</span>';
-                    }
                 }
 
                 map.on('mousemove', function(e) {
@@ -158,6 +137,7 @@ class RasterCoverageInspector(MacroElement):
                     var fs = rawFs / 2.0;
                     var rawClr = clrBytes[idx];
                     var clr = rawClr > 0 ? (rawClr - 100) : null;
+                    var elevM = (elevGrid && elevGrid.length > idx) ? elevGrid[idx] : null;
                     var d_km = haversineDist(lat, lon, txLat, txLon);
 
                     var cat = 'Blank Spot';
@@ -174,11 +154,13 @@ class RasterCoverageInspector(MacroElement):
                     }
 
                     var clrStr = (clr !== null) ? ' | Clr=' + (clr >= 0 ? '+' : '') + clr.toFixed(1) + 'm' : '';
+                    var elevStr = (elevM !== null) ? ' | Elev=' + elevM + 'm' : '';
 
                     var tooltipHtml = '<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">' +
                         '<span style="color:' + badgeColor + '; font-weight: 800;">● <b>' + cat + '</b></span>: ' +
                         '<span style="font-weight: 700; color: #ffffff;">' + fs.toFixed(1) + ' dBµV/m</span> | ' +
                         '<span style="color:#cbd5e1;">d=' + d_km.toFixed(2) + ' km</span>' +
+                        '<span style="color:#34d399;">' + elevStr + '</span>' +
                         '<span style="color:#38bdf8;">' + clrStr + '</span>' +
                         '</div>';
 
@@ -204,15 +186,6 @@ class RasterCoverageInspector(MacroElement):
                             cursorBox.addTo(map);
                         }
                     }
-
-                    if (hudContainer) {
-                        hudContainer.innerHTML = 
-                            '<span style="font-weight:700; color:#38bdf8;">📡 ' + txName + '</span> &nbsp;|&nbsp; ' +
-                            '<b>Kuat Medan:</b> <span style="font-weight:800; color:' + badgeColor + ';">' + fs.toFixed(1) + ' dBµV/m (' + cat + ')</span> &nbsp;|&nbsp; ' +
-                            '<b>Jarak:</b> ' + d_km.toFixed(2) + ' km &nbsp;|&nbsp; ' +
-                            '<b>Clearance:</b> ' + (clr !== null ? ((clr >= 0 ? '+' : '') + clr.toFixed(1) + ' m') : 'N/A') + ' &nbsp;|&nbsp; ' +
-                            '<span style="color:#94a3b8; font-size:10px;">Grid: ' + resM + 'm × ' + resM + 'm</span>';
-                    }
                 });
 
                 map.on('mouseout', clearInspector);
@@ -230,17 +203,19 @@ class RasterCoverageInspector(MacroElement):
                     var fs = rawFs / 2.0;
                     var rawClr = clrBytes[idx];
                     var clr = rawClr > 0 ? (rawClr - 100) : null;
+                    var elevM = (elevGrid && elevGrid.length > idx) ? elevGrid[idx] : null;
                     var d_km = haversineDist(lat, lon, txLat, txLon);
                     var cat = fs >= 65.0 ? 'Sangat Kuat' : (fs >= 54.0 ? 'Kuat' : (fs >= 45.2 ? 'Sedang' : 'Blank Spot'));
                     var color = fs >= 65.0 ? '#ef4444' : (fs >= 54.0 ? '#f97316' : (fs >= 45.2 ? '#3b82f6' : '#94a3b8'));
 
-                    var popupContent = '<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 13px; line-height: 1.5; min-width: 220px;">' +
+                    var popupContent = '<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 13px; line-height: 1.5; min-width: 230px;">' +
                         '<h4 style="margin: 0 0 6px 0; color: #0284c7; font-size: 14px; font-weight: bold;">📊 Detail Sinyal Titik Grid</h4>' +
                         '<div style="border-bottom: 1px solid #cbd5e1; margin-bottom: 6px;"></div>' +
                         '<b>Pemancar:</b> ' + txName + ' (' + freqMhz + ' MHz)<br/>' +
                         '<b>Kuat Medan AI:</b> <span style="font-size: 15px; font-weight: bold; color: ' + color + ';">' + fs.toFixed(2) + ' dBµV/m</span><br/>' +
                         '<b>Kategori Layanan:</b> <b>' + cat + '</b><br/>' +
                         '<b>Jarak ke TX:</b> ' + d_km.toFixed(3) + ' km<br/>' +
+                        '<b>Ketinggian Lokasi:</b> ' + (elevM !== null ? (elevM + ' mdpl') : 'N/A') + '<br/>' +
                         '<b>Clearance Topografi:</b> ' + (clr !== null ? ((clr >= 0 ? '+' : '') + clr.toFixed(2) + ' m') : 'N/A') + '<br/>' +
                         '<b>Koordinat Titik:</b> ' + lat.toFixed(6) + ', ' + lon.toFixed(6) + '<br/>' +
                         '<b>Resolusi Grid:</b> ' + resM + 'm × ' + resM + '<br/>' +
@@ -264,7 +239,8 @@ class RasterCoverageInspector(MacroElement):
             "__FREQ_MHZ__": str(raster_data.get('freq_mhz', 0.0)),
             "__RES_M__": str(int(raster_data.get('resolution_m', 50))),
             "__FS_B64__": str(raster_data.get('fs_grid_b64', '')),
-            "__CLR_B64__": str(raster_data.get('clr_grid_b64', ''))
+            "__CLR_B64__": str(raster_data.get('clr_grid_b64', '')),
+            "__ELEV_B64__": str(raster_data.get('elev_grid_b64', ''))
         }
         for k, v in replacements.items():
             template_str = template_str.replace(k, v)
@@ -469,92 +445,143 @@ def create_cloudrf_gis_map(
         fg_tx.add_to(m)
 
     # 6. Layer: Single Point Prediction Ray & Target Marker
-    if single_point_ctx is not None and single_point_res is not None:
-        fg_sp = folium.FeatureGroup(name="🎯 Prediksi Titik Tunggal (Tx-Rx)", show=True)
-        tx_c = [float(single_point_ctx['tx_lat']), float(single_point_ctx['tx_lon'])]
+    if single_point_ctx is not None:
+        fg_sp = folium.FeatureGroup(name="🎯 Titik Penerima (Rx)", show=True)
         rx_c = [float(single_point_ctx['rx_lat']), float(single_point_ctx['rx_lon'])]
 
-        # Draw path line (Ray)
-        line_color = str(single_point_res.get('color', '#3b82f6'))
-        folium.PolyLine(
-            locations=[tx_c, rx_c],
-            color=line_color,
-            weight=3.5,
-            opacity=0.9,
-            dash_array='8, 6',
-            tooltip=f"Lintasan Propagasi: {single_point_res.get('distance_km', 0.0):.2f} km | {single_point_res.get('predicted_field_strength_dbuv_m', 0.0):.1f} dBµV/m"
-        ).add_to(fg_sp)
+        if single_point_res is not None:
+            tx_c = [float(single_point_ctx['tx_lat']), float(single_point_ctx['tx_lon'])]
+            line_color = str(single_point_res.get('color', '#3b82f6'))
+            folium.PolyLine(
+                locations=[tx_c, rx_c],
+                color=line_color,
+                weight=3.5,
+                opacity=0.9,
+                dash_array='8, 6',
+                tooltip=f"Lintasan Propagasi: {single_point_res.get('distance_km', 0.0):.2f} km | {single_point_res.get('predicted_field_strength_dbuv_m', 0.0):.1f} dBµV/m"
+            ).add_to(fg_sp)
 
-        # Receiver marker
-        rx_fs = single_point_res.get('predicted_field_strength_dbuv_m', 0.0)
-        rx_cat = single_point_res.get('category', 'N/A')
-        rx_clr = single_point_res.get('clearance_m', 0.0)
+            # Receiver marker
+            rx_fs = single_point_res.get('predicted_field_strength_dbuv_m', 0.0)
+            rx_cat = single_point_res.get('category', 'N/A')
+            rx_clr = single_point_res.get('clearance_m', 0.0)
 
-        popup_rx = f"""
-        <div style="font-family: sans-serif; font-size: 13px; min-width: 200px;">
-            <h4 style="margin: 0 0 5px 0; color: #0284c7;">📍 Lokasi Penerima (Rx)</h4>
-            <b>Koordinat:</b> {rx_c[0]:.6f}, {rx_c[1]:.6f}<br/>
-            <b>Kuat Medan AI:</b> <span style="font-weight:bold; color:{line_color};">{rx_fs:.2f} dBµV/m</span><br/>
-            <b>Kategori:</b> <b>{rx_cat}</b><br/>
-            <b>Clearance Topografi:</b> {rx_clr:+.2f} m<br/>
-            <b>Jarak ke Tx:</b> {single_point_res.get('distance_km', 0.0):.2f} km
-        </div>
-        """
-        folium.Marker(
-            location=rx_c,
-            popup=folium.Popup(popup_rx, max_width=280),
-            tooltip=f"Rx: {rx_fs:.1f} dBµV/m ({rx_cat})",
-            icon=folium.Icon(color='green' if rx_fs >= 45.2 else 'gray', icon='user', prefix='fa')
-        ).add_to(fg_sp)
+            popup_rx = f"""
+            <div style="font-family: sans-serif; font-size: 13px; min-width: 200px;">
+                <h4 style="margin: 0 0 5px 0; color: #0284c7;">📍 Lokasi Penerima (Rx)</h4>
+                <b>Koordinat:</b> {rx_c[0]:.6f}, {rx_c[1]:.6f}<br/>
+                <b>Kuat Medan AI:</b> <span style="font-weight:bold; color:{line_color};">{rx_fs:.2f} dBµV/m</span><br/>
+                <b>Kategori:</b> <b>{rx_cat}</b><br/>
+                <b>Clearance Topografi:</b> {rx_clr:+.2f} m<br/>
+                <b>Jarak ke Tx:</b> {single_point_res.get('distance_km', 0.0):.2f} km
+            </div>
+            """
+            folium.Marker(
+                location=rx_c,
+                popup=folium.Popup(popup_rx, max_width=280),
+                tooltip=f"Rx: {rx_fs:.1f} dBµV/m ({rx_cat})",
+                icon=folium.Icon(color='green' if rx_fs >= 45.2 else 'gray', icon='user', prefix='fa')
+            ).add_to(fg_sp)
+        else:
+            folium.Marker(
+                location=rx_c,
+                tooltip=f"📍 Titik Terpilih: {rx_c[0]:.6f}, {rx_c[1]:.6f}",
+                icon=folium.Icon(color='blue', icon='crosshairs', prefix='fa')
+            ).add_to(fg_sp)
 
         fg_sp.add_to(m)
 
-    # 7. CloudRF Style Vertical Colorbar Legend (Transparent Background - Blends Seamlessly with Map)
+        fg_sp.add_to(m)
+
+    # 7. CloudRF Style Vertical Colorbar Legend (Stacked Boxes in Upper-Right Corner)
     colorbar_html = """
     <div style="
         position: fixed; 
-        top: 60px; right: 16px; width: 68px; 
+        top: 10px; right: 10px; 
         background: transparent !important; 
-        color: #f8fafc !important; 
         border: none !important; 
         z-index: 999999 !important; 
-        padding: 2px !important; 
-        box-shadow: none !important; 
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; 
-        text-align: center !important;
-        pointer-events: none;
+        text-align: center !important; 
+        pointer-events: none; 
     ">
-        <div style="font-weight: 800; font-size: 11px; color: #38bdf8; letter-spacing: 0.5px; margin-bottom: 6px; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);">
+        <div style="
+            background: rgba(15, 23, 42, 0.70);
+            color: #38bdf8;
+            font-weight: 800;
+            font-size: 11px;
+            padding: 3px 6px;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            border: 1px solid rgba(0, 0, 0, 0.5);
+            border-bottom: none;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+            letter-spacing: 0.5px;
+        ">
             dBµV/m
         </div>
-        <div style="display: flex; flex-direction: row; align-items: stretch; justify-content: center; height: 185px;">
+        <div style="
+            display: flex;
+            flex-direction: column;
+            border: 1px solid rgba(0, 0, 0, 0.6);
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+        ">
             <div style="
-                width: 14px; 
-                margin-right: 7px; 
-                border-radius: 4px; 
-                background: linear-gradient(to bottom, 
-                    #ef4444 0%, 
-                    #ef4444 32%, 
-                    #f97316 32%, 
-                    #f97316 64%, 
-                    #3b82f6 64%, 
-                    #3b82f6 86%,
-                    transparent 86%,
-                    transparent 100%);
-                border: 1.5px solid rgba(15, 23, 42, 0.85);
-                box-shadow: 0 0 2px rgba(255, 255, 255, 0.5), 0 2px 5px rgba(0,0,0,0.4);
-            "></div>
-            <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; font-weight: 800; text-align: left; line-height: 1;">
-                <span style="color: #ef4444; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Sangat Kuat (≥65 dBµV/m)">≥65</span>
-                <span style="color: #f97316; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Kuat (54 - 65 dBµV/m)">54</span>
-                <span style="color: #3b82f6; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Sedang (45.2 - 54 dBµV/m)">45.2</span>
-                <span style="color: #e2e8f0; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);" title="Blank Spot (<45.2 dBµV/m)">&lt;45.2</span>
+                background: #ef4444;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: 800;
+                padding: 6px 10px;
+                min-width: 44px;
+                text-align: center;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                border-bottom: 1px solid rgba(0,0,0,0.2);
+            " title="Sangat Kuat (≥65 dBµV/m)">
+                ≥65
             </div>
-        </div>
-        <div style="font-size: 9px; font-weight: 800; color: #e2e8f0; margin-top: 6px; text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9); letter-spacing: 0.5px;">
-            DVB-T2
+            <div style="
+                background: #f97316;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: 800;
+                padding: 6px 10px;
+                min-width: 44px;
+                text-align: center;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                border-bottom: 1px solid rgba(0,0,0,0.2);
+            " title="Kuat (54 – 65 dBµV/m)">
+                54
+            </div>
+            <div style="
+                background: #3b82f6;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: 800;
+                padding: 6px 10px;
+                min-width: 44px;
+                text-align: center;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                border-bottom: 1px solid rgba(0,0,0,0.2);
+            " title="Sedang (45.2 – 54 dBµV/m)">
+                45.2
+            </div>
+            <div style="
+                background: rgba(15, 23, 42, 0.40);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                color: #f1f5f9;
+                font-size: 11px;
+                font-weight: 800;
+                padding: 6px 10px;
+                min-width: 44px;
+                text-align: center;
+                text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+            " title="Blank Spot (<45.2 dBµV/m)">
+                &lt;45.2
+            </div>
         </div>
     </div>
     """
