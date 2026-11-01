@@ -1,6 +1,18 @@
-# DVB-T2 Broadcast AI Propagation & GIS Suite (Multi-Region)
+# RealFieldAI: Real Measurement-Based Field Artificial Intelligence
+> **Tagline:** *Real Measurements, Intelligent Predictions*  
+> *(Alternatif: From Real Measurements to Intelligent Predictions)*
 
-Aplikasi end-to-end berbasis Python, Machine Learning (**XGBoost** & **Optuna**), dan Sistem Informasi Geografis (**Streamlit** & **Folium / Leaflet**) untuk memprediksi kuat medan sinyal (*field strength* dalam $\text{dB}\mu\text{V/m}$) siaran televisi digital terestrial DVB-T2 pada kanal UHF (Band IV/V), serta memetakan area jangkauan hingga ke wilayah *blank spot* yang tidak terjangkau pengukuran darat.
+| Elemen | Identitas Resmi |
+|---|---|
+| **Nama Aplikasi** | **RealFieldAI** |
+| **Kepanjangan** | **Real Measurement-Based Field Artificial Intelligence** |
+| **Tagline Utama** | **Real Measurements, Intelligent Predictions** |
+| **Alternatif Tagline** | *From Real Measurements to Intelligent Predictions* |
+| **Fungsi Utama** | Prediksi kuat medan dan pemetaan coverage area |
+| **Sumber Data** | Pengukuran lapangan (*Drive-test measurement*) |
+| **Metode Saat Ini** | Machine Learning berbasis *XGBoost* & Analisis Topografi (*Line-of-Sight / Terrain Clearance*) |
+
+Aplikasi *end-to-end* berbasis Python, Machine Learning (**XGBoost** & **Optuna**), dan Sistem Informasi Geografis (**Streamlit** & **Folium / Leaflet**) untuk memprediksi kuat medan sinyal (*field strength* dalam $\text{dB}\mu\text{V/m}$) siaran televisi digital terestrial DVB-T2 pada kanal UHF (Band IV/V), serta memetakan area jangkauan hingga ke wilayah *blank spot* yang tidak terjangkau pengukuran darat.
 
 ---
 

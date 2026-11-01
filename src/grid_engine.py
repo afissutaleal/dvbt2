@@ -22,6 +22,40 @@ from src.features import (
 )
 
 
+def calculate_max_radio_horizon_km(
+    tx_params: Dict[str, Any],
+    test_points: Optional[List[Dict[str, Any]]] = None,
+    df_region: Optional[pd.DataFrame] = None
+) -> float:
+    """
+    Automatically determines the maximum effective Radio Horizon distance (km)
+    for coverage grid computation based on:
+    1. Tower antenna height AMSL (H_tx)
+    2. Receiver elevations across official test points in the service area
+    3. Regional maximum terrain elevations from dataset / terrain model
+    4. Minimum guarantee of standard radio horizon (k=4/3)
+    """
+    tx_amsl = float(tx_params.get('H_ANT_masl', 100.0))
+    d_h_base = calculate_radio_horizon(tx_amsl, 1.5)
+
+    candidates = [d_h_base]
+
+    if test_points:
+        from src.terrain_engine import fetch_elevations_batch
+        tp_lats = [float(tp['lat']) for tp in test_points]
+        tp_lons = [float(tp['lon']) for tp in test_points]
+        tp_elevs = fetch_elevations_batch(tp_lats, tp_lons)
+        for elev in tp_elevs:
+            candidates.append(calculate_radio_horizon(tx_amsl, float(elev) + 1.5))
+
+    if df_region is not None and len(df_region) > 0 and 'rx_antenna_amsl' in df_region.columns:
+        max_rx_data = float(df_region['rx_antenna_amsl'].quantile(0.99))
+        candidates.append(calculate_radio_horizon(tx_amsl, max_rx_data))
+
+    max_h = max(candidates)
+    return round(float(np.clip(max_h, 25.0, 120.0)), 1)
+
+
 def generate_radius_grid_boxes(
     tx_lat: float,
     tx_lon: float,
@@ -253,7 +287,11 @@ def predict_coverage_grid_with_subsampling(
             opacity = 0.0 # Invisible / transparent on map
             is_covered = False
             n_blank += 1
-            fs = min(fs, 30.0) # Strict cutoff below 45.2 dBµV/m
+            from src.terrain_engine import calculate_knife_edge_diffraction_loss
+            l_nlos = calculate_knife_edge_diffraction_loss(clr_val, d_box, d_box * 0.7, freq_hz) if (is_cut_by_nlos or is_terrain_obstructed) else 0.0
+            l_hor = max(d_box - d_horizon_box, 0.0) * 1.5 if is_cut_by_horizon else 0.0
+            base_fs = min(fs, 30.0)
+            fs = min(max(base_fs - l_nlos - l_hor, 0.0), 30.0)
         elif fs >= t_sangat:
             category = 'Sangat Kuat'
             color = '#ef4444' # Merah
@@ -345,7 +383,9 @@ def generate_continuous_coverage_raster(
     rx_antenna_amsl: float = 1.5,
     thresholds: Optional[Dict[str, float]] = None,
     strict_nlos_cutoff: bool = False,
-    max_grid_dim: int = 600
+    max_grid_dim: int = 600,
+    service_area_polygon: Optional[List[List[float]]] = None,
+    coverage_scope: str = "radius"
 ) -> Tuple[Dict[str, Any], pd.DataFrame, Dict[str, Any]]:
     """
     Industry-Standard Telecom Coverage Engine (CloudRF / Radio Mobile Continuous Raster Heatmap):
@@ -426,8 +466,15 @@ def generate_continuous_coverage_raster(
         flat_mesh_lat, flat_mesh_lon
     ).reshape(H, W)
 
-    in_circle = (d_km <= radius_km)
-    valid_idx = np.where(in_circle)
+    # Physical propagation: Raster is NOT artificially clipped by a knife-edge circle or polygon boundary.
+    # The coverage heatmap displays natural electromagnetic wave propagation across the terrain.
+    # Signal display is only bounded by:
+    # 1. Receiver radio horizon (d_horizon per receiver elevation & earth curvature k=4/3)
+    # 2. Minimum reception threshold (E < 45.2 dBµV/m is transparent Blank Spot)
+    # 3. Terrain obstruction (clearance < 0m drops to transparent Blank Spot when strict NLoS cutoff is active)
+    valid_mask = np.ones((H, W), dtype=bool)
+
+    valid_idx = np.where(valid_mask)
     n_valid = len(valid_idx[0])
 
     d_valid = d_km[valid_idx]
@@ -447,11 +494,12 @@ def generate_continuous_coverage_raster(
     clr_valid = ray_clearances[ray_idx, dist_idx]
     elev_valid = elevs[ray_idx, dist_idx]
 
-    # Radio Horizon & Obstruction Cutoff
-    d_horizon_box = 4.122 * (np.sqrt(max(tx_amsl, 0.0)) + np.sqrt(max(rx_antenna_amsl, 0.0)))
-    is_beyond_horizon = d_valid > d_horizon_box
-    is_nlos = clr_valid < 0.0
-    is_cut_nlos = strict_nlos_cutoff & is_nlos
+    # Dynamic point-specific Radio Horizon accounting for local receiver terrain elevation AMSL
+    rx_total_amsl = elev_valid + rx_antenna_amsl
+    d_horizon_box = 4.122 * (np.sqrt(max(tx_amsl, 0.0)) + np.sqrt(np.maximum(rx_total_amsl, 0.0)))
+    is_beyond_horizon = (d_valid > d_horizon_box)
+    is_nlos = (clr_valid < 0.0)
+    is_cut_nlos = (strict_nlos_cutoff & is_nlos)
 
     # Build XGBoost feature matrix
     X_df = pd.DataFrame({
@@ -461,7 +509,7 @@ def generate_continuous_coverage_raster(
         'azimuth_sin': az_sin.astype(np.float32),
         'azimuth_cos': az_cos.astype(np.float32),
         'tx_antenna_amsl': np.full(n_valid, tx_amsl, dtype=np.float32),
-        'rx_antenna_amsl': np.full(n_valid, rx_antenna_amsl, dtype=np.float32),
+        'rx_antenna_amsl': rx_total_amsl.astype(np.float32),
         'clearance_m': clr_valid.astype(np.float32)
     })
 
@@ -470,8 +518,31 @@ def generate_continuous_coverage_raster(
     cols_to_use = [col for col in expected_features if col in X_df.columns]
     preds = model.predict(X_df[cols_to_use])
 
-    # Apply hard physical cutoffs
-    preds[is_beyond_horizon | is_cut_nlos] = 30.0
+    # Continuous physical attenuation for Radio Horizon & Terrain Obstruction (Strict NLoS)
+    # 1. Knife-Edge Diffraction Loss (ITU-R P.526) for NLoS paths
+    c_speed = 299792458.0
+    lam = c_speed / max(float(freq_hz), 1e8)
+    d_tot_m = np.maximum(d_valid * 1000.0, 200.0)
+    d1_m = d_tot_m * 0.7
+    d2_m = np.maximum(d_tot_m - d1_m, 100.0)
+    f1 = np.sqrt((lam * d1_m * d2_m) / d_tot_m)
+    v_diff = (np.abs(np.minimum(clr_valid, 0.0)) / np.maximum(f1, 1.0)) * np.sqrt(2.0)
+    loss_nlos = np.where(
+        is_nlos,
+        np.clip(6.9 + 20.0 * np.log10(np.sqrt((v_diff - 0.1)**2 + 1.0) + (v_diff - 0.1)), 0.0, 60.0),
+        0.0
+    )
+
+    # 2. Beyond Radio Horizon Diffraction Loss (1.5 dB/km excess)
+    d_excess = np.maximum(d_valid - d_horizon_box, 0.0)
+    loss_hor = np.where(is_beyond_horizon, d_excess * 1.5, 0.0)
+
+    # Apply physical attenuation to cut areas (ensure below Blank Spot ceiling 30.0 dBµV/m)
+    cut_mask = is_beyond_horizon | is_cut_nlos
+    total_loss = loss_nlos + loss_hor
+    base_preds = np.minimum(preds, 30.0)
+    attenuated_preds = np.maximum(base_preds - total_loss, 0.0)
+    preds[cut_mask] = np.minimum(attenuated_preds[cut_mask], 30.0)
 
     # 3. Build RGBA continuous coverage image
     rgba = np.zeros((H, W, 4), dtype=np.uint8)
@@ -555,6 +626,20 @@ def generate_continuous_coverage_raster(
 
     is_covered = (preds >= t_sedang)
 
+    # In-boundary Wilayah Layanan testing
+    has_sa = bool(service_area_polygon is not None and len(service_area_polygon) >= 3)
+    in_wl = np.zeros(n_valid, dtype=bool)
+    wl_total_area_km2 = 0.0
+
+    if has_sa:
+        import matplotlib.path as mpath
+        from src.kml_engine import calculate_polygon_area_km2
+        poly_arr = np.array(service_area_polygon)
+        poly_path = mpath.Path(poly_arr)
+        pts_to_test = np.column_stack([lats_valid, lons_valid])
+        in_wl = poly_path.contains_points(pts_to_test)
+        wl_total_area_km2 = calculate_polygon_area_km2(service_area_polygon)
+
     df_sample_results = pd.DataFrame({
         'center_lat': np.round(lats_valid[sample_sub_idx], 6),
         'center_lon': np.round(lons_valid[sample_sub_idx], 6),
@@ -565,37 +650,113 @@ def generate_continuous_coverage_raster(
         'category': categories[sample_sub_idx],
         'color': colors[sample_sub_idx],
         'is_covered': is_covered[sample_sub_idx],
+        'in_service_area': in_wl[sample_sub_idx] if has_sa else True,
         'tx_stn_name': tx_params.get('STN_NAME', 'TX'),
         'frequency_mhz': round(freq_hz / 1e6, 2),
         'resolution_m': resolution_m
     })
 
-    # 5. KPIs
-    circle_area_km2 = np.pi * (radius_km ** 2)
-    n_sangat = int(np.sum(m_sk))
-    n_kuat = int(np.sum(m_k))
-    n_sedang = int(np.sum(m_s))
-    n_blank = n_valid - (n_sangat + n_kuat + n_sedang)
+    # 5. Physics-Based Accurate Geodesic Area & KPIs
+    step_lat_km = (max_lat - min_lat) * lat_m / (H * 1000.0)
+    step_lon_km = (max_lon - min_lon) * lon_m / (W * 1000.0)
+    cell_area_km2 = step_lat_km * step_lon_km
 
-    pct_cov = ((n_sangat + n_kuat + n_sedang) / n_valid) * 100.0 if n_valid > 0 else 0.0
-    covered_km2 = circle_area_km2 * (pct_cov / 100.0)
+    # Transmitter physical footprint (total radiated area reaching reception threshold >= 45.2 dBµV/m)
+    n_cov_total = int(np.sum(is_covered))
+    tx_covered_km2 = float(n_cov_total * cell_area_km2)
+    tx_sangat_kuat_km2 = float(np.sum(m_sk) * cell_area_km2)
+    tx_kuat_km2 = float(np.sum(m_k) * cell_area_km2)
+    tx_sedang_km2 = float(np.sum(m_s) * cell_area_km2)
+
+    tx_pct_sk = (np.sum(m_sk) / max(n_cov_total, 1)) * 100.0 if n_cov_total > 0 else 0.0
+    tx_pct_k = (np.sum(m_k) / max(n_cov_total, 1)) * 100.0 if n_cov_total > 0 else 0.0
+    tx_pct_s = (np.sum(m_s) / max(n_cov_total, 1)) * 100.0 if n_cov_total > 0 else 0.0
+
+    # Official Wilayah Layanan In-Boundary Analysis
+    if has_sa and wl_total_area_km2 > 0:
+        is_covered_in_wl = is_covered & in_wl
+        n_cov_in_wl = int(np.sum(is_covered_in_wl))
+        wl_covered_km2 = float(n_cov_in_wl * cell_area_km2)
+        wl_pct_covered = (wl_covered_km2 / max(wl_total_area_km2, 1e-3)) * 100.0
+        wl_blank_km2 = max(0.0, wl_total_area_km2 - wl_covered_km2)
+        wl_pct_blank = max(0.0, 100.0 - wl_pct_covered)
+
+        # Per-category metrics strictly inside the Wilayah Layanan
+        m_sk_in_wl = m_sk & in_wl
+        m_k_in_wl = m_k & in_wl
+        m_s_in_wl = m_s & in_wl
+
+        wl_sangat_kuat_km2 = float(np.sum(m_sk_in_wl) * cell_area_km2)
+        wl_kuat_km2 = float(np.sum(m_k_in_wl) * cell_area_km2)
+        wl_sedang_km2 = float(np.sum(m_s_in_wl) * cell_area_km2)
+
+        # Percentage against total Wilayah Layanan area (so SK + K + S = wl_pct_covered)
+        wl_pct_sk = (wl_sangat_kuat_km2 / max(wl_total_area_km2, 1e-3)) * 100.0
+        wl_pct_k = (wl_kuat_km2 / max(wl_total_area_km2, 1e-3)) * 100.0
+        wl_pct_s = (wl_sedang_km2 / max(wl_total_area_km2, 1e-3)) * 100.0
+
+        # Composition percentage against covered area in Wilayah Layanan
+        wl_comp_pct_sk = (np.sum(m_sk_in_wl) / max(n_cov_in_wl, 1)) * 100.0 if n_cov_in_wl > 0 else 0.0
+        wl_comp_pct_k = (np.sum(m_k_in_wl) / max(n_cov_in_wl, 1)) * 100.0 if n_cov_in_wl > 0 else 0.0
+        wl_comp_pct_s = (np.sum(m_s_in_wl) / max(n_cov_in_wl, 1)) * 100.0 if n_cov_in_wl > 0 else 0.0
+    else:
+        wl_covered_km2 = tx_covered_km2
+        wl_pct_covered = 100.0
+        wl_blank_km2 = 0.0
+        wl_pct_blank = 0.0
+        wl_sangat_kuat_km2 = tx_sangat_kuat_km2
+        wl_kuat_km2 = tx_kuat_km2
+        wl_sedang_km2 = tx_sedang_km2
+        wl_pct_sk = tx_pct_sk
+        wl_pct_k = tx_pct_k
+        wl_pct_s = tx_pct_s
+        wl_comp_pct_sk = tx_pct_sk
+        wl_comp_pct_k = tx_pct_k
+        wl_comp_pct_s = tx_pct_s
 
     kpis = {
         'total_boxes': n_valid,
         'effective_resolution_m': resolution_m,
-        'total_area_km2': round(circle_area_km2, 1),
-        'covered_area_km2': round(covered_km2, 1),
-        'blank_area_km2': round(circle_area_km2 - covered_km2, 1),
-        'pct_covered': round(pct_cov, 1),
-        'pct_sangat_kuat': round((n_sangat / n_valid) * 100.0, 1),
-        'pct_kuat': round((n_kuat / n_valid) * 100.0, 1),
-        'pct_sedang': round((n_sedang / n_valid) * 100.0, 1),
-        'pct_blank_spot': round((n_blank / n_valid) * 100.0, 1),
+        'cell_area_km2': round(cell_area_km2, 6),
+        # Wilayah Layanan Metrics (Sesuai Permenkominfo KML)
+        'has_service_area': has_sa,
+        'wl_total_area_km2': round(wl_total_area_km2, 1),
+        'wl_covered_area_km2': round(wl_covered_km2, 1),
+        'wl_pct_covered': round(wl_pct_covered, 2),
+        'wl_blank_area_km2': round(wl_blank_km2, 1),
+        'wl_pct_blank': round(wl_pct_blank, 2),
+        'wl_sangat_kuat_km2': round(wl_sangat_kuat_km2, 1),
+        'wl_kuat_km2': round(wl_kuat_km2, 1),
+        'wl_sedang_km2': round(wl_sedang_km2, 1),
+        'wl_pct_sk': round(wl_pct_sk, 2),
+        'wl_pct_k': round(wl_pct_k, 2),
+        'wl_pct_s': round(wl_pct_s, 2),
+        'wl_comp_pct_sk': round(wl_comp_pct_sk, 1),
+        'wl_comp_pct_k': round(wl_comp_pct_k, 1),
+        'wl_comp_pct_s': round(wl_comp_pct_s, 1),
+        # Transmitter Physical Footprint Metrics
+        'tx_total_footprint_km2': round(tx_covered_km2, 1),
+        'tx_sangat_kuat_km2': round(tx_sangat_kuat_km2, 1),
+        'tx_kuat_km2': round(tx_kuat_km2, 1),
+        'tx_sedang_km2': round(tx_sedang_km2, 1),
+        'tx_pct_sk': round(tx_pct_sk, 1),
+        'tx_pct_k': round(tx_pct_k, 1),
+        'tx_pct_s': round(tx_pct_s, 1),
+        # Strict NLoS & Physics
         'strict_nlos_cutoff': strict_nlos_cutoff,
         'n_cut_by_nlos': int(np.sum(is_cut_nlos)),
-        'mean_field_strength': round(float(np.mean(preds)), 2),
-        'min_field_strength': round(float(np.min(preds)), 2),
-        'max_field_strength': round(float(np.max(preds)), 2)
+        'mean_field_strength': round(float(np.mean(preds)), 2) if n_valid > 0 else 0.0,
+        'min_field_strength': round(float(np.min(preds)), 2) if n_valid > 0 else 0.0,
+        'max_field_strength': round(float(np.max(preds)), 2) if n_valid > 0 else 0.0,
+        # Backward-compatible fields
+        'total_area_km2': round(wl_total_area_km2 if has_sa else tx_covered_km2, 1),
+        'covered_area_km2': round(wl_covered_km2, 1),
+        'blank_area_km2': round(wl_blank_km2, 1),
+        'pct_covered': round(wl_pct_covered, 2),
+        'pct_sangat_kuat': round(tx_pct_sk, 1),
+        'pct_kuat': round(tx_pct_k, 1),
+        'pct_sedang': round(tx_pct_s, 1),
+        'pct_blank_spot': round(wl_pct_blank, 1) if has_sa else 0.0
     }
 
     return raster_overlay_data, df_sample_results, kpis

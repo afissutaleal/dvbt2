@@ -240,6 +240,7 @@ class DVBT2ModelManager:
             rx_antenna_amsl=float(rx_antenna_amsl)
         )
         clearance_val = float(clearance_info['clearance_m'])
+        rx_total_amsl = float(clearance_info.get('rx_total_amsl', rx_antenna_amsl))
 
         X_single = pd.DataFrame([{
             'frequency_hz': freq_hz,
@@ -248,7 +249,7 @@ class DVBT2ModelManager:
             'azimuth_sin': float(az_sin[0]),
             'azimuth_cos': float(az_cos[0]),
             'tx_antenna_amsl': tx_amsl,
-            'rx_antenna_amsl': float(rx_antenna_amsl),
+            'rx_antenna_amsl': rx_total_amsl,
             'clearance_m': clearance_val
         }])
 
@@ -259,27 +260,43 @@ class DVBT2ModelManager:
         pred_fs = float(self.active_model.predict(X_single[cols_to_use])[0])
 
         # Radio Horizon Boundary Guardrail
-        d_horizon = calculate_radio_horizon(tx_amsl, rx_antenna_amsl)
+        d_horizon = calculate_radio_horizon(tx_amsl, rx_total_amsl)
         horizon_margin = round(float(d_horizon - dist_km), 2)
         is_los = bool(dist_km <= d_horizon)
         is_terrain_obstructed = bool(clearance_val < 0.0)
 
-        # Cutoff rules:
-        # 1. Beyond Radio Horizon (always strict cutoff by Earth curvature)
-        # 2. Strict NLoS Cutoff (if user toggle enabled and terrain clearance < 0 m)
+        # Physical Attenuation & Cutoff rules:
+        # 1. Beyond Radio Horizon (Earth curvature diffraction loss)
+        # 2. Strict NLoS Cutoff (Terrain obstruction diffraction loss when clearance < 0 m)
         is_cut_by_horizon = not is_los
         is_cut_by_nlos = bool(strict_nlos_cutoff and is_terrain_obstructed)
-        is_blank = is_cut_by_horizon or is_cut_by_nlos
 
-        if is_blank:
+        # Compute continuous physical loss
+        d1_km = float(clearance_info.get('d1_km', dist_km * 0.5))
+        from src.terrain_engine import calculate_knife_edge_diffraction_loss
+        loss_nlos = calculate_knife_edge_diffraction_loss(clearance_val, dist_km, d1_km, freq_hz) if (is_cut_by_nlos or is_terrain_obstructed) else 0.0
+
+        d_excess = max(dist_km - d_horizon, 0.0)
+        loss_horizon = (d_excess * 1.5) if is_cut_by_horizon else 0.0
+
+        raw_pred_fs = pred_fs
+        is_blank = is_cut_by_horizon or is_cut_by_nlos or (pred_fs < 45.2)
+
+        if is_cut_by_nlos or is_cut_by_horizon:
+            # Apply continuous physical diffraction and horizon attenuation below Blank Spot ceiling (30.0 dBµV/m)
+            base_fs = min(pred_fs, 30.0)
+            attenuated_fs = max(base_fs - loss_nlos - loss_horizon, 0.0)
+            pred_fs = min(attenuated_fs, 30.0)
             category = 'Blank Spot'
             color = 'transparent'
-            if is_cut_by_horizon:
-                d_excess = dist_km - d_horizon
-                pred_fs = min(max(pred_fs - (d_excess * 2.0), 10.0), 30.0) # Strictly in Blank Spot range
-            else:
-                pred_fs = min(pred_fs, 30.0) # Forced into Blank Spot by Strict NLoS cutoff
+            is_estimated = True
+        elif pred_fs < 45.2:
+            # Naturally below reception threshold
+            category = 'Blank Spot'
+            color = 'transparent'
+            is_estimated = True
         else:
+            is_estimated = False
             # Classification
             if pred_fs >= 65.0:
                 category = 'Sangat Kuat'
@@ -287,15 +304,20 @@ class DVBT2ModelManager:
             elif pred_fs >= 54.0:
                 category = 'Kuat'
                 color = '#f97316' # Oranye
-            elif pred_fs >= 45.2:
+            else:
                 category = 'Sedang'
                 color = '#3b82f6' # Biru
-            else:
-                category = 'Blank Spot'
-                color = 'transparent'
+
+        pred_display = f"{pred_fs:.1f} dBµV/m (Est.)" if is_estimated else f"{pred_fs:.1f} dBµV/m"
 
         return {
-            'predicted_field_strength_dbuv_m': round(pred_fs, 2),
+            'predicted_field_strength_dbuv_m': round(pred_fs, 1),
+            'raw_predicted_field_strength_dbuv_m': round(raw_pred_fs, 1),
+            'pred_display': pred_display,
+            'is_estimated': is_estimated,
+            'diffraction_loss_db': round(loss_nlos, 1),
+            'horizon_loss_db': round(loss_horizon, 1),
+            'total_loss_db': round(loss_nlos + loss_horizon, 1),
             'category': category,
             'color': color,
             'distance_km': round(dist_km, 3),

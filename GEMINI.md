@@ -1,10 +1,19 @@
-# Project Rules & Architecture: DVB-T2 Broadcast AI Propagation & GIS Suite
+# Project Rules & Architecture: RealFieldAI
+> **RealFieldAI** (*Real Measurement-Based Field Artificial Intelligence*)  
+> *Tagline:* **Real Measurements, Intelligent Predictions**  
+> *Alternatif Tagline:* *From Real Measurements to Intelligent Predictions*
 
-Selamat datang di proyek **DVB-T2 Broadcast AI Propagation & GIS Suite**. File ini adalah panduan kontekstual otomatis untuk agen Google Antigravity dan tim pengembang.
+Selamat datang di proyek **RealFieldAI** (*Real Measurement-Based Field Artificial Intelligence*). File ini adalah panduan kontekstual otomatis untuk agen Google Antigravity dan tim pengembang.
 
 ---
 
-## 📌 Ringkasan Proyek
+## 📌 Ringkasan & Identitas Resmi Proyek
+* **Nama Aplikasi:** RealFieldAI
+* **Kepanjangan:** Real Measurement-Based Field Artificial Intelligence
+* **Tagline:** Real Measurements, Intelligent Predictions (*Alt: From Real Measurements to Intelligent Predictions*)
+* **Fungsi Utama:** Prediksi kuat medan dan pemetaan coverage area
+* **Sumber Data:** Pengukuran lapangan (*Drive-test measurement*)
+* **Metode:** XGBoost Machine Learning dengan integrasi elevasi & clearance topografi lintasan gelombang
 Aplikasi berbasis Web Dashboard (**Streamlit**) yang mengintegrasikan Machine Learning (**XGBoost** + **Optuna**) dan Sistem Informasi Geografis (**Folium/Leaflet**) untuk memodelkan dan memprediksi kuat medan siaran televisi digital DVB-T2 (Band IV/V UHF) secara akurat hingga ke area *blank spot*.
 
 Aplikasi ini mencakup:

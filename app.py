@@ -26,6 +26,7 @@ import src.model_engine
 import src.grid_engine
 import src.gis_viz
 import src.storage
+import src.kml_engine
 importlib.reload(src.features)
 importlib.reload(src.terrain_engine)
 importlib.reload(src.split_utils)
@@ -33,6 +34,7 @@ importlib.reload(src.model_engine)
 importlib.reload(src.grid_engine)
 importlib.reload(src.gis_viz)
 importlib.reload(src.storage)
+importlib.reload(src.kml_engine)
 
 # Internal Modules
 from src.features import (
@@ -77,9 +79,10 @@ from src.gis_viz import (
 )
 
 # Page Setup
+favicon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "favicon.png")
 st.set_page_config(
-    page_title="DVB-T2 SOOTHSAYER • RF Propagation AI & GIS Engine",
-    page_icon="📡",
+    page_title="RealFieldAI • Real Measurements, Intelligent Predictions",
+    page_icon=favicon_path if os.path.exists(favicon_path) else "📡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -93,47 +96,70 @@ st.markdown("""
         font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
-    /* Elevate and widen layout to maximize map canvas */
+    /* Layout geometry: elevated main view with minimal gap below Streamlit fixed header */
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 2.65rem !important;
         padding-bottom: 2rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+        padding-left: 1.2rem !important;
+        padding-right: 1.2rem !important;
         max-width: 99% !important;
     }
-    section[data-testid="stSidebar"] .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 1.5rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+
+    /* Collapse empty element wrappers holding <style> */
+    div[data-testid="element-container"]:has(style:only-child) {
+        display: none !important;
     }
-    div[data-testid="stSidebarUserContent"] {
-        padding-top: 0.5rem !important;
+
+    /* Elevate sidebar content all the way to the top */
+    [data-testid="stSidebar"] {
+        padding-top: 0rem !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+        padding-top: 0.2rem !important;
+        padding-bottom: 0rem !important;
+        min-height: 2rem !important;
+        height: auto !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        padding-top: 0rem !important;
+        padding-left: 0.8rem !important;
+        padding-right: 0.8rem !important;
+        margin-top: -1.2rem !important;
+    }
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 0rem !important;
+        padding-bottom: 1.5rem !important;
+        padding-left: 0.8rem !important;
+        padding-right: 0.8rem !important;
     }
     header[data-testid="stHeader"] {
-        background: transparent !important;
-        height: 2.2rem !important;
+        background: #ffffff !important;
+        height: 2.5rem !important;
+        z-index: 9999 !important;
+        border-bottom: 1px solid #f1f5f9 !important;
     }
 
     /* Executive Toolbar Header */
     .cloudrf-header {
         background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #0B132B 100%);
         color: #F8FAFC;
-        padding: 10px 18px;
-        border-radius: 10px;
-        margin-bottom: 10px;
+        padding: 8px 18px;
+        border-radius: 8px;
+        margin-top: 0px !important;
+        margin-bottom: 8px;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
         border: 1px solid rgba(255, 255, 255, 0.12);
         display: flex;
         justify-content: space-between;
         align-items: center;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 12px;
     }
     .header-left {
         display: flex;
-        align-items: center;
-        gap: 14px;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 220px;
     }
     .header-brand {
         font-family: 'JetBrains Mono', monospace;
@@ -144,17 +170,27 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 8px;
+        line-height: 1.2;
     }
     .header-tagline {
-        font-size: 0.82rem;
+        font-size: 0.80rem;
         color: #94A3B8;
         font-weight: 500;
+        line-height: 1.3;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 55vw;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .header-pills-row {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
         align-items: center;
+        justify-content: flex-end;
     }
     .cloudrf-pill {
         display: inline-flex;
@@ -162,35 +198,37 @@ st.markdown("""
         gap: 6px;
         font-size: 0.78rem;
         font-weight: 700;
-        padding: 4px 11px;
+        padding: 5px 12px;
         border-radius: 6px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
     }
-    .pill-region {
-        background: rgba(14, 165, 233, 0.2);
-        color: #38BDF8;
-        border: 1px solid rgba(14, 165, 233, 0.4);
+    .pill-channels {
+        background: rgba(234, 179, 8, 0.2);
+        color: #FDE047;
+        border: 1px solid rgba(234, 179, 8, 0.45);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.78rem;
     }
     .pill-model-ok {
         background: rgba(16, 185, 129, 0.2);
         color: #34D399;
-        border: 1px solid rgba(16, 185, 129, 0.4);
+        border: 1px solid rgba(16, 185, 129, 0.45);
     }
     .pill-model-no {
         background: rgba(245, 158, 11, 0.2);
         color: #FBBF24;
-        border: 1px solid rgba(245, 158, 11, 0.4);
+        border: 1px solid rgba(245, 158, 11, 0.45);
     }
     .pill-data {
         background: rgba(99, 102, 241, 0.2);
         color: #A5B4FC;
-        border: 1px solid rgba(99, 102, 241, 0.4);
+        border: 1px solid rgba(99, 102, 241, 0.45);
     }
     .pill-nlos {
         background: rgba(239, 68, 68, 0.2);
         color: #F87171;
-        border: 1px solid rgba(239, 68, 68, 0.4);
+        border: 1px solid rgba(239, 68, 68, 0.45);
     }
 
     /* Split Screen Bar */
@@ -275,15 +313,19 @@ manager = src.model_engine.DVBT2ModelManager(models_dir=MODELS_DIR)
 # SIDEBAR: KONTROL NAVIGASI & OPERASI CLOUDRF
 # ==============================================================================
 with st.sidebar:
-    st.markdown("""
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-        <img src="https://img.icons8.com/fluency/96/broadcast-tower.png" width="42" />
-        <div>
-            <div style="font-family:'JetBrains Mono', monospace; font-weight:800; font-size:1.05rem; color:#0284C7; line-height:1.2;">SOOTHSAYER RF</div>
-            <div style="font-size:0.75rem; color:#64748B; font-weight:600;">DVB-T2 AI & GIS SUITE</div>
+    # Logo & Nama Aplikasi Resmi RealFieldAI
+    logo_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "realfield_ai_logo.png")
+    if os.path.exists(logo_file):
+        st.image(logo_file, use_container_width=True)
+    else:
+        st.markdown("""
+        <div style="font-family:'Plus Jakarta Sans', sans-serif; font-weight:800; font-size:1.3rem; color:#0B2240; margin-bottom:2px;">
+            RealField<span style="color:#1C8B82;">AI</span>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        <div style="font-size:0.75rem; color:#475569; font-weight:500; margin-bottom:12px;">
+            Real Measurements, Intelligent Predictions
+        </div>
+        """, unsafe_allow_html=True)
 
     # 1. Discover all available saved regions from disk & models
     available_regions = list_available_regions(DATA_DIR, MODELS_DIR)
@@ -396,6 +438,11 @@ with st.sidebar:
         saved_region_data = None
         model_loaded = False
 
+    # Discover matching Masterplan DVB-T2 Service Area & Test Points
+    kml_engine = src.kml_engine.get_masterplan_engine()
+    current_sa = kml_engine.find_service_area(region_code) or kml_engine.find_service_area(region_name)
+    current_tps = kml_engine.get_test_points_for_area(current_sa['norm_key']) if current_sa else []
+
     # 2. View / Mode Switcher in Sidebar (When an existing region is selected)
     if not is_new_region_mode:
         st.markdown('<div class="sidebar-heading">📋 MODE TAMPILAN & OPERASI</div>', unsafe_allow_html=True)
@@ -413,7 +460,14 @@ with st.sidebar:
             label_visibility="collapsed"
         )
 
-        st.markdown('<div class="sidebar-heading">⚙️ KONTROL OPERASI</div>', unsafe_allow_html=True)
+        if active_view == "🗺️ Simulasi Cakupan (Coverage Grid)":
+            st.markdown('<div class="sidebar-heading">⚙️ PARAMETER COVERAGE</div>', unsafe_allow_html=True)
+        elif active_view == "🎯 Prediksi Titik Tunggal":
+            st.markdown('<div class="sidebar-heading">⚙️ PARAMETER TITIK TUNGGAL</div>', unsafe_allow_html=True)
+        elif active_view == "🧠 Model AI & Retraining":
+            st.markdown('<div class="sidebar-heading">⚙️ PARAMETER PELATIHAN AI</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="sidebar-heading">⚙️ PARAMETER OPERASI</div>', unsafe_allow_html=True)
 
         # Contextual controls based on active view
         df_tx_curr = st.session_state.get('df_tx_summary')
@@ -434,13 +488,16 @@ with st.sidebar:
             )
 
         elif active_view == "🧠 Model AI & Retraining":
-            st.markdown("##### ⚙️ Parameter Pelatihan AI")
             optuna_trials_input = st.slider("Jumlah Iterasi Optuna (Trials):", min_value=10, max_value=60, value=25, step=5)
             btn_retrain_ai = st.button("🚀 Mulai Pelatihan Ulang Model AI", type="primary", use_container_width=True)
 
         elif active_view == "🗺️ Simulasi Cakupan (Coverage Grid)":
-            st.markdown("##### 🗺️ Parameter Coverage (Peta Raster Telekomunikasi)")
             cov_tx_selected = st.selectbox("Pilih Pemancar:", tx_names_list, index=0 if len(tx_names_list) > 0 else 0)
+
+            sa_name_display = current_sa.get('raw_name', 'Wilayah Layanan KML') if current_sa else 'Wilayah Layanan KML'
+            if current_sa:
+                st.caption(f"🏛️ **Wilayah Layanan Masterplan:** `{sa_name_display}`")
+
             cov_resolution = st.selectbox(
                 "Resolusi Grid Analisis:",
                 options=[100, 50, 10],
@@ -448,21 +505,44 @@ with st.sidebar:
                 format_func=lambda x: f"{x}m x {x}m (Maksimum)" if x == 100 else f"{x}m x {x}m",
                 help="Ukuran resolusi perhitungan medan siaran: 10m x 10m (mikro), 50m x 50m (semi-urban), dan 100m x 100m (makro)."
             )
-            cov_radius = st.slider(
-                "Radius Analisis Cakupan (km):",
+
+            # Jangkauan Komputasi Grid ditentukan otomatis berdasarkan Radio Horizon Maksimal
+            from src.grid_engine import calculate_max_radio_horizon_km
+            sel_tx_prev = df_tx_curr[df_tx_curr['STN_NAME'] == cov_tx_selected].iloc[0].to_dict() if (df_tx_curr is not None and len(df_tx_curr) > 0 and cov_tx_selected) else {}
+            cov_radius = calculate_max_radio_horizon_km(
+                tx_params=sel_tx_prev,
+                test_points=current_tps,
+                df_region=st.session_state.get('df_model')
+            ) if sel_tx_prev else 50.0
+
+            st.caption(f"🔭 **Jangkauan Komputasi Otomatis:** `{cov_radius:.1f} km` *(Berdasarkan Radio Horizon Maksimal)*")
+
+            tp_tolerance = st.slider(
+                "Toleransi Batas Maksimum Titik Uji (+dB):",
                 min_value=1.0,
-                max_value=60.0,
-                value=20.0,
-                step=1.0,
-                help="Radius area cakupan siaran menara pemancar (1.0 s.d. 60.0 km). Peta raster telekomunikasi beroperasi cepat dan bebas hang."
+                max_value=6.0,
+                value=3.0,
+                step=0.5,
+                help="Toleransi batas maksimum kuat medan di titik test point perbatasan untuk mencegah interferensi ke wilayah layanan tetangga (standar koordinasi Permenkominfo No. 6/2019: +3.0 dB)."
             )
-            cov_strict_nlos = st.toggle("Strict NLoS Cutoff (Area Terhalang)", value=False, help="Potong mutlak area terhalang bukit menjadi Blank Spot.")
+            cov_strict_nlos = st.toggle("Strict NLoS Cutoff (Area Terhalang Bukit)", value=False, help="Potong mutlak area terhalang kontur perbukitan (clearance < 0m) menjadi Blank Spot transparan.")
             btn_run_coverage = st.button("🎨 Bangkitkan Peta Coverage", type="primary", use_container_width=True)
 
         elif active_view == "🎯 Prediksi Titik Tunggal":
-            st.markdown("##### 🎯 Parameter Titik Tunggal")
-            st.info("💡 **Tips:** Klik langsung pada peta untuk memilih titik penerima (Rx), atau masukkan koordinat secara manual di bawah.")
+            st.info("💡 **Tips:** Klik langsung pada peta untuk memilih titik penerima (Rx), gunakan pintasan titik uji resmi di bawah, atau ketik koordinat manual.")
             sp_tx_selected = st.selectbox("Pilih Pemancar:", tx_names_list, index=0 if len(tx_names_list) > 0 else 0, key="sb_sp_tx")
+
+            if current_tps:
+                tp_options = ["-- Pilih Titik Uji Acuan KML --"] + [f"{tp['name']} (Target: {tp['ref_fs_dbuv']} dBµV/m)" for tp in current_tps]
+                sel_tp_quick = st.selectbox("📍 Pintasan Titik Uji (Test Point KML):", options=tp_options, index=0, help="Pilih salah satu titik uji resmi untuk mengisi koordinat secara otomatis.")
+                if sel_tp_quick != "-- Pilih Titik Uji Acuan KML --":
+                    matched_tp_obj = next(t for t in current_tps if t['name'] in sel_tp_quick)
+                    if st.session_state.get('last_selected_tp') != matched_tp_obj['name']:
+                        st.session_state['last_selected_tp'] = matched_tp_obj['name']
+                        st.session_state['sp_rx_lat_val'] = matched_tp_obj['lat']
+                        st.session_state['sp_rx_lon_val'] = matched_tp_obj['lon']
+                        st.session_state['rx_coord_version'] = st.session_state.get('rx_coord_version', 0) + 1
+                        st.rerun()
             
             p_row_init = df_tx_curr[df_tx_curr['STN_NAME'] == sp_tx_selected].iloc[0] if len(tx_names_list) > 0 else None
             default_lat = float(p_row_init['SID_LAT']) + 0.08 if p_row_init is not None else -1.20
@@ -473,15 +553,16 @@ with st.sidebar:
             if 'sp_rx_lon_val' not in st.session_state:
                 st.session_state['sp_rx_lon_val'] = default_lon
 
+            rx_ver = st.session_state.get('rx_coord_version', 0)
             cur_lat = float(st.session_state['sp_rx_lat_val'])
             cur_lon = float(st.session_state['sp_rx_lon_val'])
 
-            sp_rx_lat = st.number_input("Latitude Penerima (Rx):", value=cur_lat, format="%.6f", key="input_sp_rx_lat")
-            sp_rx_lon = st.number_input("Longitude Penerima (Rx):", value=cur_lon, format="%.6f", key="input_sp_rx_lon")
+            sp_rx_lat = st.number_input("Latitude Penerima (Rx):", value=cur_lat, format="%.6f", key=f"input_sp_rx_lat_{rx_ver}")
+            sp_rx_lon = st.number_input("Longitude Penerima (Rx):", value=cur_lon, format="%.6f", key=f"input_sp_rx_lon_{rx_ver}")
             st.session_state['sp_rx_lat_val'] = sp_rx_lat
             st.session_state['sp_rx_lon_val'] = sp_rx_lon
 
-            sp_rx_amsl = st.number_input("Tinggi Antena Rx (m AMSL):", value=25.0, step=5.0)
+            sp_rx_amsl = st.number_input("Tinggi Antena Rx (m AMSL):", value=25.0, step=5.0, key="sp_rx_amsl")
             sp_strict_nlos = st.toggle("Strict NLoS Cutoff", value=False, key="sp_toggle_nlos")
             btn_run_sp = st.button("🎯 Hitung Kuat Medan", type="primary", use_container_width=True)
 
@@ -507,15 +588,35 @@ n_tx_count = len(st.session_state.get('df_tx_summary', []))
 n_dt_count = len(st.session_state.get('df_model', []))
 badge_data = f'<span class="cloudrf-pill pill-data">💾 {n_tx_count} TX • {n_dt_count:,} Titik</span>' if n_tx_count > 0 else '<span class="cloudrf-pill pill-data">📂 Data Belum Dimuat</span>'
 
-# Executive Toolbar Header
+# Service Area Info & Header Construction
+if current_sa:
+    sa_clean_name = current_sa.get('raw_name', region_name)
+    sa_cov_text = current_sa.get('covered_areas', '')
+    sa_chan_text = current_sa.get('channels', '')
+else:
+    sa_clean_name = region_name
+    sa_cov_text = ''
+    sa_chan_text = ''
+
+# Left Header: Nama Wilayah Layanan sebagai Identitas Utama (Font Besar, tanpa prefix 'Wilayah Layanan:')
+# Ditambah info Cakupan Administratif di baris kedua
+if sa_cov_text:
+    tagline_html = f'<div class="header-tagline" title="Cakupan Administratif: {sa_cov_text}"><span style="color:#C084FC; font-weight:700;">🏛️ Cakupan:</span> <span style="color:#CBD5E1;">{sa_cov_text}</span></div>'
+else:
+    tagline_html = '<div class="header-tagline"><span style="color:#94A3B8;">RealFieldAI • Real Measurements, Intelligent Predictions</span></div>'
+
+# Right Header: Telemetry Badges (Kanal Frekuensi DVB-T2, Status Model AI R², dan Data TX/Titik)
+badge_chan = f'<span class="cloudrf-pill pill-channels" title="Alokasi Kanal Frekuensi DVB-T2">📺 Kanal: CH {sa_chan_text}</span>' if sa_chan_text else ''
+
+# Executive Toolbar Header (Tersebar merata: Identitas & Cakupan di Kiri, Telemetri di Kanan)
 st.markdown(f"""
 <div class="cloudrf-header">
     <div class="header-left">
-        <div class="header-brand">📡 DVB-T2 SOOTHSAYER</div>
-        <div class="header-tagline">AI PROPAGATION & GIS ENGINE • BAND IV/V UHF</div>
+        <div class="header-brand">📍 {sa_clean_name}</div>
+        {tagline_html}
     </div>
     <div class="header-pills-row">
-        <span class="cloudrf-pill pill-region">📍 {region_name}</span>
+        {badge_chan}
         {badge_model}
         {badge_data}
     </div>
@@ -536,7 +637,17 @@ if not is_new_region_mode:
             st.error("⚠️ Data pemancar belum dimuat.")
         else:
             sel_tx_row = df_tx_curr[df_tx_curr['STN_NAME'] == cov_tx_selected].iloc[0].to_dict()
-            with st.spinner(f"Membangkitkan peta coverage continuous raster {cov_resolution}m x {cov_resolution}m dalam radius {cov_radius}km..."):
+            sa_poly = current_sa['polygon'] if current_sa else None
+
+            if 'cov_radius' not in locals() or cov_radius is None:
+                from src.grid_engine import calculate_max_radio_horizon_km
+                cov_radius = calculate_max_radio_horizon_km(
+                    tx_params=sel_tx_row,
+                    test_points=current_tps,
+                    df_region=st.session_state.get('df_model')
+                )
+
+            with st.spinner(f"Membangkitkan peta coverage continuous raster {cov_resolution}m x {cov_resolution}m (Jangkauan Radio Horizon {cov_radius:.1f} km)..."):
                 raster_overlay, df_grid_res, kpis = generate_continuous_coverage_raster(
                     model=manager.active_model,
                     tx_params=sel_tx_row,
@@ -544,8 +655,21 @@ if not is_new_region_mode:
                     resolution_m=float(cov_resolution),
                     rx_antenna_amsl=1.5,
                     thresholds={'sangat_kuat': 65.0, 'kuat': 54.0, 'sedang': 45.2},
+                    strict_nlos_cutoff=cov_strict_nlos,
+                    service_area_polygon=sa_poly
+                )
+
+                # Evaluasi Kepatuhan Batas Maksimum Titik Uji (Test Points Permenkominfo KML)
+                tol_val = tp_tolerance if 'tp_tolerance' in locals() else 3.0
+                df_tp_eval, tp_summary = src.kml_engine.evaluate_test_points_compliance(
+                    model_manager=manager,
+                    tx_params=sel_tx_row,
+                    test_points=current_tps,
+                    tolerance_db=tol_val,
+                    rx_antenna_amsl=1.5,
                     strict_nlos_cutoff=cov_strict_nlos
                 )
+
                 st.session_state['active_coverage_grid'] = {
                     'raster_overlay_data': raster_overlay,
                     'df_grid_res': df_grid_res,
@@ -555,9 +679,12 @@ if not is_new_region_mode:
                     'resolution_m': cov_resolution,
                     'effective_res_m': cov_resolution,
                     'strict_nlos': cov_strict_nlos,
-                    'mode': 'raster'
+                    'mode': 'raster',
+                    'df_tp_eval': df_tp_eval,
+                    'tp_summary': tp_summary,
+                    'sa_name': sa_name_display if 'sa_name_display' in locals() else 'Wilayah Layanan KML'
                 }
-                st.success(f"✅ Peta cakupan raster telekomunikasi berhasil dibangkitkan (Radius {cov_radius} km, resolusi {cov_resolution}m x {cov_resolution}m)!")
+                st.success(f"✅ Peta cakupan raster berhasil dibangkitkan (Jangkauan radio horizon {cov_radius:.1f} km, resolusi {cov_resolution}m x {cov_resolution}m)!")
 
     # Trigger: Run Single Point Prediction
     if active_view == "🎯 Prediksi Titik Tunggal" and 'btn_run_sp' in locals() and btn_run_sp:
@@ -624,6 +751,11 @@ elif active_view == "🗺️ Simulasi Cakupan (Coverage Grid)" and cov_data_stor
 elif active_view == "🎯 Prediksi Titik Tunggal" and sp_ctx_map is not None:
     highlight_stn = sp_ctx_map.get('stn_name')
 
+# Fetch official DVB-T2 Service Area Boundary & Test Points (Masterplan KML)
+kml_engine = src.kml_engine.get_masterplan_engine()
+current_sa = kml_engine.find_service_area(region_code) or kml_engine.find_service_area(region_name)
+current_tps = kml_engine.get_test_points_for_area(current_sa['norm_key']) if current_sa else []
+
 # Render Folium Map
 map_obj = create_cloudrf_gis_map(
     df_tx_summary=df_tx_for_map,
@@ -636,6 +768,9 @@ map_obj = create_cloudrf_gis_map(
     show_coverage_grid=show_cov_on_map,
     single_point_ctx=sp_ctx_map,
     single_point_res=sp_res_map,
+    service_area_polygon=current_sa,
+    service_area_testpoints=current_tps,
+    test_point_evaluations=cov_data_stored.get('df_tp_eval') if cov_data_stored is not None else None,
     basemap_choice=chosen_basemap
 )
 
@@ -658,8 +793,7 @@ if active_view == "🎯 Prediksi Titik Tunggal" and map_output and map_output.ge
         st.session_state['last_handled_map_click'] = (c_lat, c_lon)
         st.session_state['sp_rx_lat_val'] = c_lat
         st.session_state['sp_rx_lon_val'] = c_lon
-        st.session_state['input_sp_rx_lat'] = c_lat
-        st.session_state['input_sp_rx_lon'] = c_lon
+        st.session_state['rx_coord_version'] = st.session_state.get('rx_coord_version', 0) + 1
 
         if model_loaded and manager.active_model is not None and df_tx_curr is not None and len(df_tx_curr) > 0:
             sel_sp_tx_row = df_tx_curr[df_tx_curr['STN_NAME'] == sp_tx_selected].iloc[0].to_dict()
@@ -680,6 +814,18 @@ if active_view == "🎯 Prediksi Titik Tunggal" and map_output and map_output.ge
                 'rx_amsl': float(sp_rx_amsl),
                 'strict_nlos_cutoff': sp_strict_nlos
             }
+        else:
+            sel_sp_tx_row = df_tx_curr[df_tx_curr['STN_NAME'] == sp_tx_selected].iloc[0].to_dict() if df_tx_curr is not None and len(df_tx_curr) > 0 else {}
+            st.session_state['single_pred_ctx'] = {
+                'stn_name': str(sel_sp_tx_row.get('STN_NAME', 'TX')),
+                'tx_lat': float(sel_sp_tx_row.get('SID_LAT', c_lat)),
+                'tx_lon': float(sel_sp_tx_row.get('SID_LONG', c_lon)),
+                'rx_lat': float(c_lat),
+                'rx_lon': float(c_lon),
+                'rx_amsl': float(sp_rx_amsl),
+                'strict_nlos_cutoff': sp_strict_nlos
+            }
+        st.toast(f"📍 Titik Penerima (Rx) Terpilih: {c_lat:.5f}, {c_lon:.5f}")
         st.rerun()
 
 
@@ -1113,7 +1259,7 @@ if show_detail_panel:
     # F. MODE 5: SIMULASI CAKUPAN (COVERAGE GRID)
     # --------------------------------------------------------------------------
     elif active_view == "🗺️ Simulasi Cakupan (Coverage Grid)":
-        res_display = f"{cov_data_stored.get('resolution_m', 100)}m x {cov_data_stored.get('resolution_m', 100)}m" if cov_data_stored is not None else "100m x 100m / 50m x 50m / 10m x 10m"
+        res_display = f"{cov_data_stored.get('resolution_m', 50)}m x {cov_data_stored.get('resolution_m', 50)}m" if cov_data_stored is not None else "100m x 100m / 50m x 50m / 10m x 10m"
         st.subheader(f"🗺️ Analisis & Simulasi Cakupan Sinyal ({res_display} - Peta Raster Telekomunikasi)")
         
         if cov_data_stored is None:
@@ -1122,18 +1268,139 @@ if show_detail_panel:
             kpis = cov_data_stored['kpis']
             df_grid_res = cov_data_stored['df_grid_res']
             stn_sim = cov_data_stored['stn_name']
+            scope_lbl = cov_data_stored.get('scope_label', 'Wilayah Layanan Resmi')
+            sa_name = cov_data_stored.get('sa_name', 'Wilayah Layanan KML')
 
-            # KPI Cards
-            k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Area Tercover", f"{kpis['covered_area_km2']:.1f} km²", delta=f"{kpis['pct_covered']:.1f}%")
-            k2.metric("Sangat Kuat (≥65)", f"{kpis['pct_sangat_kuat']:.1f}%")
-            k3.metric("Kuat (54-65)", f"{kpis['pct_kuat']:.1f}%")
-            k4.metric("Sedang (45.2-54)", f"{kpis['pct_sedang']:.1f}%")
-            k5.metric("Blank Spot (<45.2)", f"{kpis['pct_blank_spot']:.1f}%")
+            st.caption(f"📍 **Evaluasi Wilayah Layanan:** `{sa_name}` • Pemancar: **{stn_sim}** • Tampilan Heatmap: *Pancaran Alami Gelombang (Dibatasi Radio Horizon, Sensitivitas ≥45.2 dBµV/m, & Kontur Topografi)*")
+
+            # Section 1: Official Service Area Coverage Performance
+            if kpis.get('has_service_area') and kpis.get('wl_total_area_km2', 0) > 0:
+                st.markdown("#### 🏛️ Kinerja Cakupan Wilayah Layanan Resmi (Masterplan DVB-T2 KML)")
+                st.caption(f"Evaluasi cakupan terhadap total luas wilayah layanan administratif **{sa_name}** ({kpis['wl_total_area_km2']:,.1f} km²). Hanya sel penerimaan di dalam batas poligon resmi yang dihitung.")
+
+                # Row 1: Overarching Service Area KPIs
+                w1, w2, w3, w4 = st.columns(4)
+                w1.metric("Luas Poligon Wilayah Layanan", f"{kpis['wl_total_area_km2']:,.1f} km²")
+                w2.metric("Luas Tercover di Wilayah", f"{kpis['wl_covered_area_km2']:,.1f} km²", delta="≥ 45.2 dBµV/m")
+                w3.metric("Persentase Wilayah Tercover", f"{kpis['wl_pct_covered']:.2f}%", delta=f"{kpis['wl_covered_area_km2']:.1f} / {kpis['wl_total_area_km2']:.0f} km²")
+                w4.metric("Blank Spot Wilayah Layanan", f"{kpis['wl_blank_area_km2']:,.1f} km²", delta=f"{kpis['wl_pct_blank']:.1f}%", delta_color="inverse")
+
+                # Row 2: Per-Category Breakdown Strictly Inside Wilayah Layanan
+                st.markdown("##### 📶 Distribusi Kategori Kuat Sinyal di dalam Wilayah Layanan")
+                wc1, wc2, wc3, wc4 = st.columns(4)
+                wc1.metric(
+                    "🔴 Sangat Kuat (≥65)",
+                    f"{kpis.get('wl_sangat_kuat_km2', 0):.1f} km²",
+                    delta=f"{kpis.get('wl_pct_sk', 0):.2f}% dari Wilayah"
+                )
+                wc2.metric(
+                    "🟠 Kuat (54-65)",
+                    f"{kpis.get('wl_kuat_km2', 0):.1f} km²",
+                    delta=f"{kpis.get('wl_pct_k', 0):.2f}% dari Wilayah"
+                )
+                wc3.metric(
+                    "🔵 Sedang (45.2-54)",
+                    f"{kpis.get('wl_sedang_km2', 0):.1f} km²",
+                    delta=f"{kpis.get('wl_pct_s', 0):.2f}% dari Wilayah"
+                )
+                wc4.metric(
+                    "⚪ Blank Spot (<45.2)",
+                    f"{kpis.get('wl_blank_area_km2', 0):.1f} km²",
+                    delta=f"{kpis.get('wl_pct_blank', 0):.2f}% (Belum Tercover)",
+                    delta_color="inverse"
+                )
+
+                # Diagnostic Summary Table for Wilayah Layanan Categories
+                df_wl_cats = pd.DataFrame([
+                    {
+                        "Kategori Sinyal": "🔴 Sangat Kuat",
+                        "Ambang Kuat Medan": "≥ 65.0 dBµV/m",
+                        "Luas di Wilayah Layanan (km²)": f"{kpis.get('wl_sangat_kuat_km2', 0):.1f}",
+                        "% thd Total Wilayah Layanan": f"{kpis.get('wl_pct_sk', 0):.2f}%",
+                        "% Komposisi Area Tercover": f"{kpis.get('wl_comp_pct_sk', 0):.1f}%",
+                        "Karakteristik & Target Penerimaan": "Antena Portabel / Indoor Tanpa Bantuan"
+                    },
+                    {
+                        "Kategori Sinyal": "🟠 Kuat",
+                        "Ambang Kuat Medan": "54.0 - 64.9 dBµV/m",
+                        "Luas di Wilayah Layanan (km²)": f"{kpis.get('wl_kuat_km2', 0):.1f}",
+                        "% thd Total Wilayah Layanan": f"{kpis.get('wl_pct_k', 0):.2f}%",
+                        "% Komposisi Area Tercover": f"{kpis.get('wl_comp_pct_k', 0):.1f}%",
+                        "Karakteristik & Target Penerimaan": "Antena Outdoor Standar Perkotaan"
+                    },
+                    {
+                        "Kategori Sinyal": "🔵 Sedang",
+                        "Ambang Kuat Medan": "45.2 - 53.9 dBµV/m",
+                        "Luas di Wilayah Layanan (km²)": f"{kpis.get('wl_sedang_km2', 0):.1f}",
+                        "% thd Total Wilayah Layanan": f"{kpis.get('wl_pct_s', 0):.2f}%",
+                        "% Komposisi Area Tercover": f"{kpis.get('wl_comp_pct_s', 0):.1f}%",
+                        "Karakteristik & Target Penerimaan": "Batas Minimum DVB-T2 (Antena Outdoor Bertingkat)"
+                    },
+                    {
+                        "Kategori Sinyal": "⚪ Blank Spot",
+                        "Ambang Kuat Medan": "< 45.2 dBµV/m",
+                        "Luas di Wilayah Layanan (km²)": f"{kpis.get('wl_blank_area_km2', 0):.1f}",
+                        "% thd Total Wilayah Layanan": f"{kpis.get('wl_pct_blank', 0):.2f}%",
+                        "% Komposisi Area Tercover": "-",
+                        "Karakteristik & Target Penerimaan": "Perlu Pemancar Pengisi Sinyal (Gap Filler / SFN Repeater)"
+                    }
+                ])
+                st.dataframe(df_wl_cats, use_container_width=True, hide_index=True)
+
+                st.info(f"💡 **Catatan Rekayasa Siaran:** Wilayah Layanan **{sa_name}** memiliki luas total **{kpis['wl_total_area_km2']:,.1f} km²** yang membentang lintas kabupaten/kota. Satu menara pemancar tunggal (**{stn_sim}**) melayani **{kpis['wl_covered_area_km2']:.1f} km²** (**{kpis['wl_pct_covered']:.2f}%** dari total provinsi). Sisa wilayah layanan (**{kpis['wl_blank_area_km2']:,.1f} km²**) secara regulasi dialokasikan untuk dilayani oleh menara pemancar transmisi lain (*transposer / SFN repeater*) di kabupaten/kota lainnya dalam wilayah layanan yang sama.")
+
+            # Section 2: Physical Transmitter Emission Footprint
+            st.markdown("#### 📡 Jangkauan Efektif Pancaran Menara Pemancar (Transmitter Footprint)")
+            st.caption("Total area permukaan bumi yang terjangkau pancaran gelombang elektromagnetik dari menara pemancar ini (termasuk sinyal yang melintasi perbatasan wilayah secara alami).")
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total Area Tercover Pancaran", f"{kpis.get('tx_total_footprint_km2', kpis['covered_area_km2']):.1f} km²", delta="Pancaran Alami")
+            k2.metric("Sangat Kuat (≥65 dBµV/m)", f"{kpis.get('tx_sangat_kuat_km2', 0):.1f} km²", delta=f"{kpis.get('tx_pct_sk', 0):.1f}%")
+            k3.metric("Kuat (54-65 dBµV/m)", f"{kpis.get('tx_kuat_km2', 0):.1f} km²", delta=f"{kpis.get('tx_pct_k', 0):.1f}%")
+            k4.metric("Sedang (45.2-54 dBµV/m)", f"{kpis.get('tx_sedang_km2', 0):.1f} km²", delta=f"{kpis.get('tx_pct_s', 0):.1f}%")
 
             if kpis.get('n_cut_by_nlos', 0) > 0:
-                st.warning(f"✂️ **Strict NLoS Cutoff:** Sebanyak **{kpis['n_cut_by_nlos']:,} area** terhalang kontur medan dipotong mutlak menjadi Blank Spot (Transparan).")
+                st.warning(f"✂️ **Strict NLoS Cutoff:** Sebanyak **{kpis['n_cut_by_nlos']:,} area** terhalang kontur perbukitan dipotong mutlak menjadi Blank Spot (Transparan).")
 
+            # Section 3: Official Test Points Regulatory Compliance (Maximum Permissible Limit)
+            df_tp_eval = cov_data_stored.get('df_tp_eval')
+            tp_summary = cov_data_stored.get('tp_summary')
+
+            if df_tp_eval is not None and len(df_tp_eval) > 0 and tp_summary:
+                st.markdown("---")
+                st.markdown("#### 🛡️ Evaluasi Kepatuhan Koordinasi Titik Uji (Test Points Masterplan KML)")
+                st.caption(f"Evaluasi **Batas Maksimum Kuat Medan yang Diperbolehkan** di titik-titik koordinasi perbatasan sesuai Permenkominfo No. 6/2019 dengan toleransi koordinasi **+{tp_summary['tolerance_db']:.1f} dB**. Jika sinyal prediksi melebihi batas acuan, dinilai melanggar karena dapat mengakibatkan interferensi di wilayah layanan sebelahnya.")
+
+                safe_c = tp_summary.get('safe_count', tp_summary.get('pass_count', 0))
+                tol_c = tp_summary.get('tolerable_count', 0)
+                viol_c = tp_summary.get('violation_count', tp_summary.get('fail_count', 0))
+
+                tp_c1, tp_c2, tp_c3, tp_c4, tp_c5 = st.columns(5)
+                tp_c1.metric("Total Titik Uji", f"{tp_summary['total_points']} Titik")
+                tp_c2.metric("🟢 Aman / Patuh (≤ Maks)", f"{safe_c} Titik", delta="Bebas Interferensi")
+                tp_c3.metric(f"🟡 Dalam Toleransi (+{tp_summary['tolerance_db']:.0f} dB)", f"{tol_c} Titik", delta="Marginal Aman")
+                tp_c4.metric("🔴 Melanggar (> Maks)", f"{viol_c} Titik", delta="Potensi Interferensi", delta_color="inverse")
+                tp_c5.metric("Tingkat Kepatuhan", f"{tp_summary['compliance_rate_pct']:.1f}%", delta=f"Margin Rata-rata: {tp_summary['avg_margin_db']:+.1f} dB")
+
+                cols_tp_view = ['Nama Titik Uji', 'Jarak ke TX (km)', 'Clearance Medan (m)', 'Batas Maksimum Acuan (dBµV/m)', 'Ambang Batas Maks (+3 dB)', 'Prediksi Kuat Medan AI (dBµV/m)', 'Margin thd Batas Maks (dB)', 'Status Koordinasi']
+                cols_to_show = [c for c in cols_tp_view if c in df_tp_eval.columns]
+
+                # Format Display with (Est.) suffix for Blank Spot / Obstructed / Horizon points
+                df_tp_display = df_tp_eval.copy()
+                if 'Prediksi Kuat Medan AI (dBµV/m)' in df_tp_display.columns:
+                    df_tp_display['Prediksi Kuat Medan AI (dBµV/m)'] = df_tp_display.apply(
+                        lambda r: f"{float(r['Prediksi Kuat Medan AI (dBµV/m)']):.1f} (Est.)" if r.get('is_estimated') else f"{float(r['Prediksi Kuat Medan AI (dBµV/m)']):.1f}",
+                        axis=1
+                    )
+                st.dataframe(df_tp_display[cols_to_show], use_container_width=True)
+
+                if viol_c > 0:
+                    st.error(f"⚠️ **Peringatan Regulasi Koordinasi:** Terdapat **{viol_c} titik uji perbatasan** yang melanggar batas maksimum kekuatan sinyal yang diperbolehkan. Kekuatan sinyal yang bocor ke wilayah tetangga berpotensi menimbulkan interferensi ko-kanal/kanal-berdampingan. Operator disarankan untuk menurunkan EIRP atau mengatur *down-tilt* antena ke arah tersebut.")
+                else:
+                    st.success("✅ **Regulasi Koordinasi Terpenuhi:** Seluruh titik uji perbatasan berada di bawah batas maksimum yang diperbolehkan (atau dalam batas toleransi koordinasi). Pancaran pemancar aman dan tidak menimbulkan gangguan interferensi ke wilayah layanan sebelahnya.")
+
+            st.markdown("---")
+            st.markdown("#### 📊 Sampel Data Titik Grid Cakupan")
             # Table of Grid Results
             c_d1, c_d2 = st.columns(2)
             with c_d1:
@@ -1144,8 +1411,11 @@ if show_detail_panel:
                 csv_blank = df_blank.to_csv(index=False).encode('utf-8')
                 st.download_button(f"📥 Unduh Daftar Blank Spot ({len(df_blank):,} Titik) (CSV)", data=csv_blank, file_name=f"blank_spots_{stn_sim}.csv", mime="text/csv", use_container_width=True)
 
-            st.dataframe(df_grid_res[['center_lat', 'center_lon', 'distance_km', 'clearance_m', 'median_field_strength_dbuv_m', 'category', 'is_covered']].head(500), use_container_width=True, height=280)
-            st.caption(f"Menampilkan 500 sampel titik data pertama dari total {len(df_grid_res):,} titik (Peta Raster Telekomunikasi, Resolusi: **{cov_data_stored.get('resolution_m', 100)}m x {cov_data_stored.get('resolution_m', 100)}m**, Radius: **{cov_data_stored.get('radius_km')} km**).")
+            cols_show = ['center_lat', 'center_lon', 'distance_km', 'clearance_m', 'median_field_strength_dbuv_m', 'category', 'is_covered']
+            if 'in_service_area' in df_grid_res.columns:
+                cols_show.append('in_service_area')
+            st.dataframe(df_grid_res[cols_show].head(500), use_container_width=True, height=260)
+            st.caption(f"Menampilkan 500 sampel titik data pertama dari total {len(df_grid_res):,} titik (Peta Raster Telekomunikasi, Resolusi: **{cov_data_stored.get('resolution_m', 50)}m x {cov_data_stored.get('resolution_m', 50)}m**, Lingkup Evaluasi: **{scope_lbl}**).")
 
     # --------------------------------------------------------------------------
     # G. MODE 6: PREDIKSI TITIK TUNGGAL (SINGLE POINT)
@@ -1163,9 +1433,11 @@ if show_detail_panel:
             clr = single_res['clearance_m']
             is_los = single_res['is_los']
             d_km = single_res['distance_km']
+            is_est = single_res.get('is_estimated', False)
+            fs_display = f"{fs_pred:.2f} dBµV/m (Est.)" if is_est else f"{fs_pred:.2f} dBµV/m"
 
             sp_c1, sp_c2, sp_c3, sp_c4 = st.columns(4)
-            sp_c1.metric("Prediksi Kuat Medan AI", f"{fs_pred:.2f} dBµV/m", delta=cat)
+            sp_c1.metric("Prediksi Kuat Medan AI", fs_display, delta=cat)
             sp_c2.metric("Jarak Geodesik Haversine", f"{d_km:.2f} km")
             sp_c3.metric("Terrain Clearance", f"{clr:+.2f} m", delta="Line of Sight (LoS)" if clr >= 0 else "Obstructed (NLoS)")
             sp_c4.metric("Margin Cakrawala Radio", f"{single_res['horizon_margin_km']:.2f} km", delta="Di Dalam Horizon" if is_los else "Di Luar Horizon")

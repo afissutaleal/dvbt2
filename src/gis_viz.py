@@ -109,7 +109,24 @@ class RasterCoverageInspector(MacroElement):
                     if (cursorBox && map.hasLayer(cursorBox)) map.removeLayer(cursorBox);
                 }
 
+                var mapContainer = map.getContainer();
+                if (mapContainer) {
+                    mapContainer.addEventListener('mouseover', function(ev) {
+                        if (ev.target && ev.target.closest && ev.target.closest('.leaflet-marker-icon, .leaflet-popup, .leaflet-tooltip')) {
+                            clearInspector();
+                        }
+                    }, true);
+                }
+
                 map.on('mousemove', function(e) {
+                    if (e.originalEvent && e.originalEvent.target) {
+                        var tgt = e.originalEvent.target;
+                        if (tgt.closest && tgt.closest('.leaflet-marker-icon, .leaflet-popup, .leaflet-control, .leaflet-tooltip')) {
+                            clearInspector();
+                            return;
+                        }
+                    }
+
                     var lat = e.latlng.lat;
                     var lon = e.latlng.lng;
 
@@ -142,6 +159,9 @@ class RasterCoverageInspector(MacroElement):
 
                     var cat = 'Blank Spot';
                     var badgeColor = '#94a3b8';
+                    var isEst = (fs < 45.2 || (clr !== null && clr < 0));
+                    var fsSuffix = isEst ? ' (Est.)' : '';
+
                     if (fs >= 65.0) {
                         cat = 'Sangat Kuat';
                         badgeColor = '#ef4444';
@@ -158,7 +178,7 @@ class RasterCoverageInspector(MacroElement):
 
                     var tooltipHtml = '<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">' +
                         '<span style="color:' + badgeColor + '; font-weight: 800;">● <b>' + cat + '</b></span>: ' +
-                        '<span style="font-weight: 700; color: #ffffff;">' + fs.toFixed(1) + ' dBµV/m</span> | ' +
+                        '<span style="font-weight: 700; color: #ffffff;">' + fs.toFixed(1) + ' dBµV/m' + fsSuffix + '</span> | ' +
                         '<span style="color:#cbd5e1;">d=' + d_km.toFixed(2) + ' km</span>' +
                         '<span style="color:#34d399;">' + elevStr + '</span>' +
                         '<span style="color:#38bdf8;">' + clrStr + '</span>' +
@@ -247,6 +267,74 @@ class RasterCoverageInspector(MacroElement):
         self._template = Template(template_str)
 
 
+class LeafletInteractiveZoomHelper(MacroElement):
+    """
+    Enables and guarantees high responsiveness of mouse wheel scroll zooming,
+    smooth zoom gestures, and double-click zoom across desktop browsers and Streamlit iframes.
+    """
+    def __init__(self):
+        super().__init__()
+        self._name = "LeafletInteractiveZoomHelper"
+        self._template = Template("""
+            {% macro script(this, kwargs) %}
+                var map = {{ this._parent.get_name() }};
+                if (map) {
+                    if (map.scrollWheelZoom) {
+                        map.scrollWheelZoom.enable();
+                    }
+                    if (map.doubleClickZoom) {
+                        map.doubleClickZoom.enable();
+                    }
+                    if (map.touchZoom) {
+                        map.touchZoom.enable();
+                    }
+                    if (map.boxZoom) {
+                        map.boxZoom.enable();
+                    }
+                    map.options.scrollWheelZoom = true;
+                    map.options.wheelDebounceTime = 40;
+                    map.options.wheelPxPerZoomLevel = 60;
+
+                    var container = map.getContainer();
+                    if (container) {
+                        if (!document.getElementById('kml-poly-style')) {
+                            var style = document.createElement('style');
+                            style.id = 'kml-poly-style';
+                            style.innerHTML = `
+                                .kml-service-area-poly { pointer-events: none !important; }
+                                .cloudrf-grid-tooltip {
+                                    background: rgba(15, 23, 42, 0.95) !important;
+                                    color: #f8fafc !important;
+                                    border: 1px solid rgba(255, 255, 255, 0.25) !important;
+                                    border-radius: 6px !important;
+                                    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6) !important;
+                                    padding: 5px 9px !important;
+                                    pointer-events: none !important;
+                                    white-space: nowrap !important;
+                                }
+                                .cloudrf-grid-tooltip:before {
+                                    border-top-color: rgba(15, 23, 42, 0.95) !important;
+                                }
+                            `;
+                            document.head.appendChild(style);
+                        }
+                        container.addEventListener('mouseenter', function() {
+                            if (map.scrollWheelZoom) {
+                                map.scrollWheelZoom.enable();
+                            }
+                        });
+                        container.addEventListener('wheel', function(e) {
+                            if (map.scrollWheelZoom) {
+                                map.scrollWheelZoom.enable();
+                            }
+                            e.stopPropagation();
+                        }, { passive: false });
+                    }
+                }
+            {% endmacro %}
+        """)
+
+
 def create_cloudrf_gis_map(
     df_tx_summary: Optional[pd.DataFrame] = None,
     df_matched_dt: Optional[pd.DataFrame] = None,
@@ -258,6 +346,9 @@ def create_cloudrf_gis_map(
     show_coverage_grid: bool = False,
     single_point_ctx: Optional[Dict[str, Any]] = None,
     single_point_res: Optional[Dict[str, Any]] = None,
+    service_area_polygon: Optional[Dict[str, Any]] = None,
+    service_area_testpoints: Optional[List[Dict[str, Any]]] = None,
+    test_point_evaluations: Optional[pd.DataFrame] = None,
     basemap_choice: str = "satellite"
 ) -> folium.Map:
     """
@@ -265,6 +356,7 @@ def create_cloudrf_gis_map(
     - Persistent top-level map canvas with professional RF telemetry look
     - Basemap options: Esri World Imagery (Satellite), CartoDB Dark Matter, OSM, Positron
     - Multi-layer capabilities: Transmitter towers, drive test routes, 100m polygon grid, and point rays
+    - Official DVB-T2 Service Area Boundary (Permenkominfo KML Polygon) & Test Points
     - Vertical CloudRF gradient colorbar legend pinned on the top right
     """
     # 1. Determine map center & default zoom
@@ -292,6 +384,9 @@ def create_cloudrf_gis_map(
     elif df_matched_dt is not None and len(df_matched_dt) > 0:
         center_lat = float(df_matched_dt['Latitude'].mean())
         center_lon = float(df_matched_dt['Longitude'].mean())
+    elif service_area_polygon is not None and 'center' in service_area_polygon:
+        center_lat = float(service_area_polygon['center'][0])
+        center_lon = float(service_area_polygon['center'][1])
 
     # 2. Initialize Folium Map
     if basemap_choice == "street":
@@ -303,8 +398,10 @@ def create_cloudrf_gis_map(
         location=[center_lat, center_lon],
         zoom_start=zoom_val,
         tiles=init_tile,
-        control_scale=True
+        control_scale=True,
+        scrollWheelZoom=True
     )
+    m.add_child(LeafletInteractiveZoomHelper())
 
     # Add standard high-quality base layers (Satellite & Street)
     folium.TileLayer(
@@ -319,6 +416,139 @@ def create_cloudrf_gis_map(
         name='🗺️ OpenStreetMap (Standar Jalan)', 
         show=(basemap_choice == "street")
     ).add_to(m)
+
+    # 2b. Layer: Official DVB-T2 Service Area Boundary (KML Polygon)
+    if service_area_polygon is not None and 'polygon' in service_area_polygon and len(service_area_polygon['polygon']) > 0:
+        sa_title = service_area_polygon.get('raw_name', 'Wilayah Layanan')
+        fg_wl = folium.FeatureGroup(name=f"🌐 Batas Wilayah Layanan ({sa_title})", show=True)
+        folium.Polygon(
+            locations=service_area_polygon['polygon'],
+            color='#0284c7',
+            weight=2.8,
+            opacity=0.95,
+            fill=True,
+            fill_color='#0284c7',
+            fill_opacity=0.04,
+            tooltip=None,
+            popup=None,
+            class_name='kml-service-area-poly'
+        ).add_to(fg_wl)
+        fg_wl.add_to(m)
+
+    # 2c. Layer: Official DVB-T2 Test Points (KML Balloon Pin Markers)
+    if service_area_testpoints is not None and len(service_area_testpoints) > 0:
+        fg_tp = folium.FeatureGroup(name="📍 Titik Uji Evaluasi (Test Points KML)", show=True)
+        eval_lookup = {}
+        if test_point_evaluations is not None and len(test_point_evaluations) > 0:
+            for _, r in test_point_evaluations.iterrows():
+                eval_lookup[str(r['Nama Titik Uji'])] = r.to_dict()
+
+        for tp in service_area_testpoints:
+            t_lat = float(tp['lat'])
+            t_lon = float(tp['lon'])
+            t_name = str(tp['name'])
+            t_fs = float(tp.get('ref_fs_dbuv', 54.0))
+
+            ev = eval_lookup.get(t_name)
+            if ev is not None:
+                status_code = ev.get('status_code', 'PASS')
+                st_color = 'green' if status_code == 'PASS' else ('orange' if status_code == 'TOLERABLE' else 'red')
+                st_icon = 'check' if status_code == 'PASS' else ('exclamation' if status_code == 'TOLERABLE' else 'times')
+                pred_fs = float(ev.get('Prediksi Kuat Medan AI (dBµV/m)', ev.get('Prediksi AI (dBµV/m)', 0.0)))
+                margin_db = float(ev.get('Margin thd Batas Maks (dB)', ev.get('Margin Kepatuhan (dB)', 0.0)))
+                status_txt = str(ev.get('Status Koordinasi', ev.get('Status Kepatuhan', '')))
+                dist_km = float(ev.get('Jarak ke TX (km)', 0.0))
+                clr_val = ev.get('Clearance Medan (m)')
+                is_cut_nlos = bool(ev.get('is_cut_by_nlos', False))
+                is_cut_horizon = bool(ev.get('is_cut_by_horizon', False))
+                is_est = bool(ev.get('is_estimated', False) or is_cut_nlos or is_cut_horizon or pred_fs < 45.2)
+                est_suffix = " (Est.)" if is_est else ""
+                status_color = ev.get('color', '#10b981')
+
+                margin_note = "Aman (Di bawah batas maksimum)" if margin_db <= 0 else ("Dalam batas toleransi +3 dB" if margin_db <= 3.0 else "Melanggar (Potensi interferensi)")
+
+                clr_line = f"<b>Clearance Medan:</b> {clr_val:+.1f} m {'(Terhalang Topografi / NLoS)' if (clr_val is not None and clr_val < 0) else '(Line-of-Sight)'}<br/>" if clr_val is not None else ""
+
+                popup_tp = f"""
+                <div style="font-family: sans-serif; font-size: 13px; min-width: 250px; line-height: 1.5;">
+                    <h4 style="margin: 0 0 5px 0; color: #0284c7; font-size: 14px; font-weight: bold;">📍 {t_name}</h4>
+                    <div style="border-bottom: 1px solid #cbd5e1; margin-bottom: 6px;"></div>
+                    <b>Status Koordinasi:</b> <span style="font-weight:bold; color:{status_color};">{status_txt}</span><br/>
+                    <b>Batas Maksimum Acuan:</b> {t_fs:.1f} dBµV/m<br/>
+                    <b>Prediksi Kuat Medan AI:</b> <span style="font-size:14px; font-weight:bold; color:{status_color};">{pred_fs:.1f} dBµV/m{est_suffix}</span><br/>
+                    <b>Margin thd Batas Maks:</b> <span style="font-weight:bold; color:{status_color};">{margin_db:+.1f} dB</span> <small>({margin_note})</small><br/>
+                    {clr_line}
+                    <b>Jarak ke TX:</b> {dist_km:.2f} km<br/>
+                    <b>Koordinat:</b> {t_lat:.6f}, {t_lon:.6f}
+                    <div style="margin-top: 6px; padding: 4px 6px; background: #f8fafc; border-left: 3px solid {status_color}; font-size: 11px; color: #475569;">
+                        🛡️ <i>Titik batas koordinasi untuk mencegah interferensi lintas wilayah siaran (Permenkominfo No. 6/2019).</i>
+                    </div>
+                </div>
+                """
+                # Dark glassmorphism tooltip matching probeTooltip format
+                if status_code == 'PASS':
+                    dot_color = '#10b981' # Emerald Green
+                    if is_cut_nlos:
+                        badge_label = 'AMAN (NLOS CUTOFF)'
+                    elif is_cut_horizon:
+                        badge_label = 'AMAN (HORIZON)'
+                    elif is_est:
+                        badge_label = 'AMAN (BLANK SPOT)'
+                    else:
+                        badge_label = 'AMAN'
+                    margin_color = '#34d399'
+                elif status_code == 'TOLERABLE':
+                    dot_color = '#f59e0b' # Amber
+                    badge_label = 'TOLERANSI (+3 dB)'
+                    margin_color = '#fbbf24'
+                else:
+                    dot_color = '#ef4444' # Red
+                    badge_label = 'MELANGGAR'
+                    margin_color = '#f87171'
+
+                clr_str = f" | <span style=\"color:#38bdf8;\">Clr={clr_val:+.1f}m</span>" if clr_val is not None else ""
+
+                tooltip_tp_html = f"""<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">
+                    <span style="color:{dot_color}; font-weight: 800;">● <b>{t_name}</b> ({badge_label})</span>: 
+                    <span style="font-weight: 700; color: #ffffff;">Pred {pred_fs:.1f} dBµV/m{est_suffix}</span> | 
+                    <span style="color:#cbd5e1;">Batas Maks {t_fs:.1f} dBµV/m</span> | 
+                    <span style="color:{margin_color}; font-weight: 700;">Margin {margin_db:+.1f} dB</span> | 
+                    <span style="color:#cbd5e1;">d={dist_km:.2f} km</span>{clr_str}
+                </div>"""
+                icon_obj = folium.Icon(color=st_color, icon=st_icon, prefix='fa')
+            else:
+                popup_tp = f"""
+                <div style="font-family: sans-serif; font-size: 13px; min-width: 220px; line-height: 1.5;">
+                    <h4 style="margin: 0 0 5px 0; color: #0284c7; font-size: 13px; font-weight: bold;">📍 {t_name}</h4>
+                    <div style="border-bottom: 1px solid #cbd5e1; margin-bottom: 6px;"></div>
+                    <b>Batas Maksimum Acuan:</b> {t_fs:.1f} dBµV/m<br/>
+                    <b>Koordinat:</b> {t_lat:.6f}, {t_lon:.6f}<br/>
+                    <div style="margin-top: 6px; padding: 4px 6px; background: #f8fafc; border-left: 3px solid #0284c7; font-size: 11px; color: #475569;">
+                        🛡️ <i>Titik batas koordinasi pencegahan interferensi ke wilayah siaran tetangga.</i>
+                    </div>
+                </div>
+                """
+                tooltip_tp_html = f"""<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">
+                    <span style="color:#38bdf8; font-weight: 800;">● <b>{t_name}</b></span>: 
+                    <span style="color:#cbd5e1;">Batas Maks {t_fs:.1f} dBµV/m</span> | 
+                    <span style="color:#94a3b8;">Koordinat {t_lat:.4f}, {t_lon:.4f}</span>
+                </div>"""
+                icon_obj = folium.Icon(color='blue', icon='flag', prefix='fa')
+
+            folium.Marker(
+                location=[t_lat, t_lon],
+                popup=folium.Popup(popup_tp, max_width=290),
+                tooltip=folium.Tooltip(
+                    tooltip_tp_html,
+                    class_name="cloudrf-grid-tooltip",
+                    sticky=False,
+                    direction="top",
+                    offset=[0, -10],
+                    opacity=0.98
+                ),
+                icon=icon_obj
+            ).add_to(fg_tp)
+        fg_tp.add_to(m)
 
     # 3a. Layer: Continuous Telecom Raster Heatmap (CloudRF Style)
     if show_coverage_grid and raster_overlay_data is not None and 'image_b64' in raster_overlay_data:
@@ -435,10 +665,23 @@ def create_cloudrf_gis_map(
             </div>
             """
 
+            tooltip_tx_html = f"""<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">
+                <span style="color:#38bdf8; font-weight:800;">📡 <b>{stn}</b></span>: 
+                <span style="font-weight:700; color:#ffffff;">{f_mhz:.1f} MHz</span> | 
+                <span style="color:#fde047; font-weight:700;">EIRP {eirp:.1f} dBm</span> | 
+                <span style="color:#cbd5e1;">H_ANT {h_ant:.0f}m</span>
+            </div>"""
             folium.Marker(
                 location=[lat, lon],
                 popup=folium.Popup(popup_tx, max_width=300),
-                tooltip=f"📡 {stn} ({f_mhz:.1f} MHz | {eirp:.1f} dBm)",
+                tooltip=folium.Tooltip(
+                    tooltip_tx_html,
+                    class_name="cloudrf-grid-tooltip",
+                    sticky=False,
+                    direction="top",
+                    offset=[0, -10],
+                    opacity=0.98
+                ),
                 icon=folium.Icon(color=pin_color, icon=icon_name, prefix='fa')
             ).add_to(fg_tx)
 
@@ -465,39 +708,64 @@ def create_cloudrf_gis_map(
             rx_fs = single_point_res.get('predicted_field_strength_dbuv_m', 0.0)
             rx_cat = single_point_res.get('category', 'N/A')
             rx_clr = single_point_res.get('clearance_m', 0.0)
+            is_sp_est = bool(single_point_res.get('is_estimated', False) or rx_fs < 45.2 or rx_cat == 'Blank Spot')
+            sp_est_suffix = " (Est.)" if is_sp_est else ""
 
             popup_rx = f"""
             <div style="font-family: sans-serif; font-size: 13px; min-width: 200px;">
                 <h4 style="margin: 0 0 5px 0; color: #0284c7;">📍 Lokasi Penerima (Rx)</h4>
                 <b>Koordinat:</b> {rx_c[0]:.6f}, {rx_c[1]:.6f}<br/>
-                <b>Kuat Medan AI:</b> <span style="font-weight:bold; color:{line_color};">{rx_fs:.2f} dBµV/m</span><br/>
+                <b>Kuat Medan AI:</b> <span style="font-weight:bold; color:{line_color};">{rx_fs:.1f} dBµV/m{sp_est_suffix}</span><br/>
                 <b>Kategori:</b> <b>{rx_cat}</b><br/>
                 <b>Clearance Topografi:</b> {rx_clr:+.2f} m<br/>
                 <b>Jarak ke Tx:</b> {single_point_res.get('distance_km', 0.0):.2f} km
             </div>
             """
+            rx_cat_color = '#ef4444' if rx_cat == 'Sangat Kuat' else ('#f97316' if rx_cat == 'Kuat' else ('#3b82f6' if rx_cat == 'Sedang' else '#94a3b8'))
+            tooltip_rx_html = f"""<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">
+                <span style="color:{rx_cat_color}; font-weight:800;">🎯 <b>Penerima (Rx)</b> ({rx_cat})</span>: 
+                <span style="font-weight:700; color:#ffffff;">{rx_fs:.1f} dBµV/m{sp_est_suffix}</span> | 
+                <span style="color:#cbd5e1;">d={single_point_res.get('distance_km', 0.0):.2f} km</span>
+            </div>"""
             folium.Marker(
                 location=rx_c,
                 popup=folium.Popup(popup_rx, max_width=280),
-                tooltip=f"Rx: {rx_fs:.1f} dBµV/m ({rx_cat})",
+                tooltip=folium.Tooltip(
+                    tooltip_rx_html,
+                    class_name="cloudrf-grid-tooltip",
+                    sticky=False,
+                    direction="top",
+                    offset=[0, -10],
+                    opacity=0.98
+                ),
                 icon=folium.Icon(color='green' if rx_fs >= 45.2 else 'gray', icon='user', prefix='fa')
             ).add_to(fg_sp)
         else:
+            tooltip_sel_html = f"""<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #f8fafc; white-space: nowrap;">
+                <span style="color:#38bdf8; font-weight:800;">📍 <b>Titik Terpilih</b></span>: 
+                <span style="color:#cbd5e1;">{rx_c[0]:.6f}, {rx_c[1]:.6f}</span>
+            </div>"""
             folium.Marker(
                 location=rx_c,
-                tooltip=f"📍 Titik Terpilih: {rx_c[0]:.6f}, {rx_c[1]:.6f}",
+                tooltip=folium.Tooltip(
+                    tooltip_sel_html,
+                    class_name="cloudrf-grid-tooltip",
+                    sticky=False,
+                    direction="top",
+                    offset=[0, -10],
+                    opacity=0.98
+                ),
                 icon=folium.Icon(color='blue', icon='crosshairs', prefix='fa')
             ).add_to(fg_sp)
 
         fg_sp.add_to(m)
 
-        fg_sp.add_to(m)
-
-    # 7. CloudRF Style Vertical Colorbar Legend (Stacked Boxes in Upper-Right Corner)
+    # 7. CloudRF Style Vertical Colorbar Legend (Narrow & Tall Stacked Boxes in Upper-Right Corner)
     colorbar_html = """
     <div style="
         position: fixed; 
         top: 10px; right: 10px; 
+        width: 32px;
         background: transparent !important; 
         border: none !important; 
         z-index: 999999 !important; 
@@ -506,23 +774,25 @@ def create_cloudrf_gis_map(
         pointer-events: none; 
     ">
         <div style="
-            background: rgba(15, 23, 42, 0.70);
+            background: rgba(15, 23, 42, 0.75);
             color: #38bdf8;
             font-weight: 800;
-            font-size: 11px;
-            padding: 3px 6px;
+            font-size: 8.5px;
+            padding: 4px 1px;
             border-top-left-radius: 4px;
             border-top-right-radius: 4px;
             border: 1px solid rgba(0, 0, 0, 0.5);
             border-bottom: none;
             text-shadow: 0 1px 2px rgba(0,0,0,0.9);
-            letter-spacing: 0.5px;
+            letter-spacing: -0.3px;
+            line-height: 1.1;
         ">
             dBµV/m
         </div>
         <div style="
             display: flex;
             flex-direction: column;
+            width: 32px;
             border: 1px solid rgba(0, 0, 0, 0.6);
             border-bottom-left-radius: 4px;
             border-bottom-right-radius: 4px;
@@ -532,39 +802,45 @@ def create_cloudrf_gis_map(
             <div style="
                 background: #ef4444;
                 color: #ffffff;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 800;
-                padding: 6px 10px;
-                min-width: 44px;
-                text-align: center;
+                height: 38px;
+                width: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-                border-bottom: 1px solid rgba(0,0,0,0.2);
+                border-bottom: 1px solid rgba(0,0,0,0.25);
             " title="Sangat Kuat (≥65 dBµV/m)">
                 ≥65
             </div>
             <div style="
                 background: #f97316;
                 color: #ffffff;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 800;
-                padding: 6px 10px;
-                min-width: 44px;
-                text-align: center;
+                height: 38px;
+                width: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-                border-bottom: 1px solid rgba(0,0,0,0.2);
+                border-bottom: 1px solid rgba(0,0,0,0.25);
             " title="Kuat (54 – 65 dBµV/m)">
                 54
             </div>
             <div style="
                 background: #3b82f6;
                 color: #ffffff;
-                font-size: 11px;
+                font-size: 9.5px;
                 font-weight: 800;
-                padding: 6px 10px;
-                min-width: 44px;
-                text-align: center;
+                height: 38px;
+                width: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-                border-bottom: 1px solid rgba(0,0,0,0.2);
+                border-bottom: 1px solid rgba(0,0,0,0.25);
             " title="Sedang (45.2 – 54 dBµV/m)">
                 45.2
             </div>
@@ -573,14 +849,16 @@ def create_cloudrf_gis_map(
                 backdrop-filter: blur(4px);
                 -webkit-backdrop-filter: blur(4px);
                 color: #f1f5f9;
-                font-size: 11px;
+                font-size: 9px;
                 font-weight: 800;
-                padding: 6px 10px;
-                min-width: 44px;
-                text-align: center;
+                height: 38px;
+                width: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 text-shadow: 0 1px 3px rgba(0,0,0,0.95);
             " title="Blank Spot (<45.2 dBµV/m)">
-                &lt;45.2
+                &lt;45
             </div>
         </div>
     </div>
@@ -611,8 +889,10 @@ def create_input_data_map(
         location=[center_lat, center_lon],
         zoom_start=11,
         tiles=None,
-        control_scale=True
+        control_scale=True,
+        scrollWheelZoom=True
     )
+    m.add_child(LeafletInteractiveZoomHelper())
 
     # 1. Base Tile Layers (Esri Satellite & OpenStreetMap)
     folium.TileLayer(
@@ -726,8 +1006,10 @@ def create_polygon_coverage_map(
         location=[tx_lat, tx_lon],
         zoom_start=11,
         tiles=None,
-        control_scale=True
+        control_scale=True,
+        scrollWheelZoom=True
     )
+    m.add_child(LeafletInteractiveZoomHelper())
 
     # Base layers (Esri Satellite & OpenStreetMap)
     folium.TileLayer(
@@ -892,7 +1174,13 @@ def plot_parity_scatter(y_true: np.ndarray, y_pred: np.ndarray, r2: float, rmse:
             size=6,
             opacity=0.65,
             showscale=True,
-            colorbar=dict(title='Pred (dBµV/m)')
+            colorbar=dict(
+                title=dict(text='Pred (dBµV/m)', side='top'),
+                thickness=16,
+                len=0.88,
+                y=0.5,
+                yanchor='middle'
+            )
         ),
         name='Data Sampel Uji'
     ))
@@ -910,7 +1198,17 @@ def plot_parity_scatter(y_true: np.ndarray, y_pred: np.ndarray, r2: float, rmse:
         yaxis_title="Kuat Medan Prediksi XGBoost (dBµV/m)",
         template='plotly_white',
         height=450,
-        margin=dict(l=40, r=40, t=50, b=40)
+        margin=dict(l=50, r=40, t=50, b=50),
+        legend=dict(
+            x=0.03,
+            y=0.97,
+            xanchor='left',
+            yanchor='top',
+            bgcolor='rgba(255, 255, 255, 0.88)',
+            bordercolor='#cbd5e1',
+            borderwidth=1,
+            font=dict(size=12)
+        )
     )
     return fig
 

@@ -185,7 +185,42 @@ def run_test():
 
     print("Single Point Predictor verified!")
 
-    print("\n ALL 5 PIPELINE COMPONENTS TESTED & VALIDATED SUCCESSFULLY!")
+    print("\n=== 6. Testing DVB-T2 Masterplan KML & Regulatory Test Point Compliance ===")
+    from src.kml_engine import get_masterplan_engine, evaluate_test_points_compliance, calculate_polygon_area_km2
+    kml_eng = get_masterplan_engine()
+    sa_kaltim = kml_eng.find_service_area('kaltim1')
+    assert sa_kaltim is not None, "Kalimantan Timur - 1 service area not found in KML!"
+    
+    sa_area = sa_kaltim.get('area_km2', calculate_polygon_area_km2(sa_kaltim['polygon']))
+    print(f"Service Area: {sa_kaltim['raw_name']}, Calculated Geodesic Area: {sa_area:.1f} km²")
+    assert sa_area > 20000.0, f"Area should be > 20,000 km²! Got: {sa_area}"
+
+    tps = kml_eng.get_test_points_for_area(sa_kaltim['norm_key'])
+    print(f"Test points found for area: {len(tps)}")
+    assert len(tps) > 0, "No test points found for Kalimantan Timur - 1!"
+
+    df_tp_res, tp_sum = evaluate_test_points_compliance(
+        model_manager=manager,
+        tx_params=first_tx,
+        test_points=tps,
+        tolerance_db=3.0,
+        rx_antenna_amsl=1.5,
+        strict_nlos_cutoff=False
+    )
+    print(f"Test Points Evaluation Summary:\n"
+          f"Total: {tp_sum['total_points']} | Safe (<= Max Limit): {tp_sum['safe_count']} | "
+          f"Tolerable (+3 dB): {tp_sum['tolerable_count']} | Violation (> Max Limit): {tp_sum['violation_count']} | "
+          f"Compliance Rate: {tp_sum['compliance_rate_pct']}% | Avg Margin: {tp_sum['avg_margin_db']:+.1f} dB")
+    
+    # Print diagnostic table (strip non-ascii for cp1252 Windows console compatibility)
+    df_clean_print = df_tp_res[['Nama Titik Uji', 'Jarak ke TX (km)', 'Batas Maksimum Acuan (dBµV/m)', 'Prediksi Kuat Medan AI (dBµV/m)', 'Margin thd Batas Maks (dB)', 'Status Koordinasi']].copy()
+    df_clean_print['Status Koordinasi'] = df_clean_print['Status Koordinasi'].astype(str).str.encode('ascii', 'ignore').str.decode('ascii')
+    print(df_clean_print.to_string())
+
+    assert 'safe_count' in tp_sum and 'violation_count' in tp_sum, "Compliance metrics missing!"
+    print("DVB-T2 Masterplan & Test Point Regulatory Evaluation verified!")
+
+    print("\n ALL 6 PIPELINE COMPONENTS TESTED & VALIDATED SUCCESSFULLY!")
 
 if __name__ == '__main__':
     run_test()

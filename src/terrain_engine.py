@@ -130,6 +130,40 @@ def fetch_elevations_batch(lats: List[float], lons: List[float], timeout: int = 
     return [float(r) for r in results]
 
 
+def calculate_knife_edge_diffraction_loss(
+    clearance_m: float,
+    distance_km: float,
+    d1_km: float,
+    frequency_hz: float = 600e6
+) -> float:
+    """
+    Computes Knife-Edge Obstacle Diffraction Loss according to ITU-R P.526-15.
+    If clearance >= 0m (LoS), diffraction loss is 0 dB.
+    If clearance < 0m (NLoS), obstacle penetrates the 1st Fresnel zone.
+    Returns loss in positive dB (e.g. 6.0 dB to 60.0 dB).
+    """
+    if clearance_m >= 0.0:
+        return 0.0
+
+    c = 299792458.0
+    freq = max(float(frequency_hz), 1e8)
+    lam = c / freq
+
+    d_tot_m = max(float(distance_km) * 1000.0, 200.0)
+    d1_m = np.clip(float(d1_km) * 1000.0, 100.0, d_tot_m - 100.0)
+    d2_m = max(d_tot_m - d1_m, 100.0)
+
+    # 1st Fresnel zone radius at obstacle
+    f1 = np.sqrt((lam * d1_m * d2_m) / d_tot_m)
+
+    # Dimensionless diffraction parameter v (v > 0 for obstructed path)
+    v = (abs(float(clearance_m)) / max(f1, 1.0)) * np.sqrt(2.0)
+
+    # ITU-R P.526 knife-edge approximation
+    loss_db = 6.9 + 20.0 * np.log10(np.sqrt((v - 0.1)**2 + 1.0) + (v - 0.1))
+    return float(np.clip(loss_db, 0.0, 60.0))
+
+
 def calculate_single_path_clearance(
     tx_lat: float,
     tx_lon: float,
@@ -144,10 +178,9 @@ def calculate_single_path_clearance(
     """
     Computes exact terrain clearance and obstacle parameters for a single Tx -> Rx link:
     - Path distance d (km)
-    - Obstacle distance d1 (km) and remaining distance d2 (km)
-    - Earth curvature bulge h_ER = (d1 * d2) / (12.742 * k) [meters]
-    - Line of Sight elevation h_los = [H_tx*(1 - d1/d) + H_rx*(d1/d)] - h_ER [meters]
-    - Clearance clearance_m = h_los - h_max [meters]
+    - Evaluates Line of Sight and Earth curvature across all profile samples
+    - Minimum clearance clearance_m = min(h_los - h_terr) [meters]
+    - Identifies the critical obstacle point (where clearance is minimized)
     
     Adaptive sampling:
     - Default evaluates profile between 5% and 95% of distance with adaptive step <= 500m
@@ -171,37 +204,51 @@ def calculate_single_path_clearance(
     sample_lats = [tx_lat + f * (rx_lat - tx_lat) for f in fractions]
     sample_lons = [tx_lon + f * (rx_lon - tx_lon) for f in fractions]
 
-    # Fetch terrain elevations along profile (using local cache / batch API)
-    profile_elevs = fetch_elevations_batch(sample_lats, sample_lons)
+    # Include receiver coordinate to obtain local Rx terrain elevation
+    coords_lats = sample_lats + [float(rx_lat)]
+    coords_lons = sample_lons + [float(rx_lon)]
+    all_elevs = fetch_elevations_batch(coords_lats, coords_lons)
+    profile_elevs = np.array(all_elevs[:n_samples], dtype=float)
+    rx_ground_elev = float(all_elevs[-1])
 
-    # 3. Find highest obstacle (h_max) and its distance d1
-    max_idx = int(np.argmax(profile_elevs))
-    h_max = float(profile_elevs[max_idx])
-    d1 = float(fractions[max_idx] * d_km)
-    d2 = max(float(d_km - d1), 0.0001)
+    # If rx_antenna_amsl is given as antenna height AGL (e.g. <= 30m), add ground elevation
+    if rx_antenna_amsl <= 30.0:
+        h_rx = rx_ground_elev + float(rx_antenna_amsl)
+    else:
+        h_rx = float(rx_antenna_amsl)
 
-    # 4. Earth curvature bulge (h_ER in meters)
-    h_er = (d1 * d2) / (12.742 * k_factor)
-
-    # 5. Line-of-sight elevation at d1 (h_los in meters AMSL)
     h_tx = float(tx_antenna_amsl)
-    h_rx = float(rx_antenna_amsl)
-    h_los = (h_tx * (1.0 - (d1 / d_km)) + h_rx * (d1 / d_km)) - h_er
 
-    # 6. Clearance (meters): h_los - h_max (Positive = LoS / Clear, Negative = NLoS / Obstructed)
-    clearance_m = h_los - h_max
+    # 3. Calculate clearance across ALL profile points
+    d1 = fractions * d_km
+    d2 = np.maximum(d_km - d1, 0.0001)
+    h_er = (d1 * d2) / (12.742 * k_factor)
+    h_los = (h_tx * (1.0 - fractions) + h_rx * fractions) - h_er
+    clrs = h_los - profile_elevs
+
+    # The critical obstacle is the point with the minimum clearance (deepest penetration into LoS)
+    crit_idx = int(np.argmin(clrs))
+    min_clearance = float(clrs[crit_idx])
+    h_max = float(profile_elevs[crit_idx])
+    crit_d1 = float(d1[crit_idx])
+    crit_d2 = float(d2[crit_idx])
+    crit_her = float(h_er[crit_idx])
+    crit_hlos = float(h_los[crit_idx])
 
     step_m = (0.90 * d_km / max(n_samples - 1, 1)) * 1000.0
 
     return {
         'distance_km': round(d_km, 3),
-        'd1_km': round(d1, 3),
-        'd2_km': round(d2, 3),
+        'd1_km': round(crit_d1, 3),
+        'd2_km': round(crit_d2, 3),
         'h_max_amsl': round(h_max, 2),
-        'h_er_m': round(h_er, 2),
-        'h_los_amsl': round(h_los, 2),
-        'clearance_m': round(clearance_m, 2),
-        'is_obstructed': bool(clearance_m < 0.0),
+        'h_er_m': round(crit_her, 2),
+        'h_los_amsl': round(crit_hlos, 2),
+        'clearance_m': round(min_clearance, 2),
+        'diffraction_loss_db': round(calculate_knife_edge_diffraction_loss(min_clearance, d_km, crit_d1), 1),
+        'is_obstructed': bool(min_clearance < 0.0),
+        'rx_ground_elev': round(rx_ground_elev, 2),
+        'rx_total_amsl': round(h_rx, 2),
         'n_samples': n_samples,
         'step_m': round(step_m, 1)
     }
@@ -225,7 +272,7 @@ def compute_dataset_clearance(
     2. Adaptively determines sampling density (<= 500m step across 5%-95% path length)
     3. Collects all intermediate coordinates across the entire DataFrame
     4. Performs batch elevation retrieval with disk caching
-    5. Vectorizes calculations for d1, d2, h_er, h_los, and clearance_m = h_los - h_max
+    5. Evaluates LoS and Earth curvature across all profile samples to find minimum clearance
     """
     n_rows = len(df)
     if n_rows == 0:
@@ -269,20 +316,12 @@ def compute_dataset_clearance(
     # Reshape to (n_samples, n_rows)
     elev_matrix = all_elevs.reshape((n_samples, n_rows))
 
-    # 3. For each link, find the highest obstacle (h_max) among the profile samples
-    best_sample_idx = np.argmax(elev_matrix, axis=0) # shape (n_rows,)
-    h_max = np.max(elev_matrix, axis=0) # shape (n_rows,) - replaces np.choose which has a 64-array limit in NumPy
-    d1_fractions = fractions[best_sample_idx]
-    d1 = d1_fractions * d_kms
-    d2 = np.maximum(d_kms - d1, 0.001)
+    # 3. Vectorized clearance across all profile points: clearance = h_los - h_terr
+    d1_matrix = fractions[:, None] * d_kms[None, :]
+    d2_matrix = np.maximum(d_kms[None, :] - d1_matrix, 0.001)
+    h_er_matrix = (d1_matrix * d2_matrix) / (12.742 * k_factor)
+    h_los_matrix = (tx_amsls[None, :] * (1.0 - fractions[:, None]) + rx_amsls[None, :] * fractions[:, None]) - h_er_matrix
+    clearance_matrix = h_los_matrix - elev_matrix
+    min_clearances = np.min(clearance_matrix, axis=0)
 
-    # 4. Earth curvature bulge h_ER = (d1 * d2) / (12.742 * k) [meters]
-    h_er = (d1 * d2) / (12.742 * k_factor)
-
-    # 5. Line-of-sight elevation h_los
-    h_los = (tx_amsls * (1.0 - (d1 / d_kms)) + rx_amsls * (d1 / d_kms)) - h_er
-
-    # 6. Clearance = h_los - h_max (Positive = LoS / Clear, Negative = NLoS / Obstructed)
-    clearance_m = h_los - h_max
-
-    return np.round(clearance_m, 2)
+    return np.round(min_clearances, 2)

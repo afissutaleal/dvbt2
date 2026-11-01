@@ -1,9 +1,9 @@
 {
-  "train_rmse": 3.2687,
-  "val_rmse": 3.7176,
-  "test_rmse": 3.4442,
-  "test_mae": 2.7554,
-  "test_r2": 0.868,
+  "train_rmse": 3.2219,
+  "val_rmse": 3.4535,
+  "test_rmse": 3.6868,
+  "test_mae": 2.911,
+  "test_r2": 0.8558,
   "n_train": 2618,
   "n_val": 561,
   "n_test": 561,
@@ -20,14 +20,14 @@
     "tree_method": "hist"
   },
   "feature_importances": {
-    "frequency_hz": 0.00793,
-    "eirp_dbm": 0.04056,
-    "distance_km": 0.43473,
-    "azimuth_sin": 0.08759,
-    "azimuth_cos": 0.20879,
-    "tx_antenna_amsl": 0.10495,
-    "rx_antenna_amsl": 0.05089,
-    "clearance_m": 0.06456
+    "frequency_hz": 0.00998,
+    "eirp_dbm": 0.02808,
+    "distance_km": 0.53536,
+    "azimuth_sin": 0.04173,
+    "azimuth_cos": 0.2209,
+    "tx_antenna_amsl": 0.08452,
+    "rx_antenna_amsl": 0.05336,
+    "clearance_m": 0.02607
   },
   "region_code": "test_balikpapan"
 }

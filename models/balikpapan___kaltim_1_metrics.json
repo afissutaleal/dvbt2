@@ -1,0 +1,33 @@
+{
+  "train_rmse": 3.2541,
+  "val_rmse": 3.6959,
+  "test_rmse": 3.411,
+  "test_mae": 2.7373,
+  "test_r2": 0.8706,
+  "n_train": 2618,
+  "n_val": 561,
+  "n_test": 561,
+  "best_params": {
+    "n_estimators": 857,
+    "learning_rate": 0.01900009796018043,
+    "max_depth": 4,
+    "subsample": 0.8034245483751566,
+    "colsample_bytree": 0.881810553471855,
+    "min_child_weight": 2,
+    "gamma": 0.41597640088435706,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "feature_importances": {
+    "frequency_hz": 0.00819,
+    "eirp_dbm": 0.01716,
+    "distance_km": 0.62615,
+    "azimuth_sin": 0.03435,
+    "azimuth_cos": 0.15097,
+    "tx_antenna_amsl": 0.10241,
+    "rx_antenna_amsl": 0.03576,
+    "clearance_m": 0.02501
+  },
+  "region_code": "balikpapan___kaltim_1"
+}
